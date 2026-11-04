@@ -1,0 +1,3821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
+<title>EARTHWORM</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%236b2a08'/><rect x='2' y='10' width='5' height='3' fill='%23d8482c'/><rect x='2' y='10' width='5' height='2' fill='%23fc7460'/><rect x='5' y='7' width='5' height='3' fill='%23d8482c'/><rect x='5' y='7' width='5' height='2' fill='%23fc7460'/><rect x='8' y='4' width='6' height='3' fill='%23d8482c'/><rect x='8' y='4' width='6' height='2' fill='%23fc7460'/><rect x='12' y='4' width='1' height='1' fill='%23000000'/></svg>">
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+    color: #fff;
+    font-family: monospace;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #wrap {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+  }
+  #game {
+    image-rendering: pixelated;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+    background: #000;
+    display: block;
+  }
+  #pad {
+    position: fixed;
+    bottom: 16px;
+    left: 16px;
+    width: 160px;
+    height: 160px;
+    touch-action: none;
+    pointer-events: auto;
+  }
+  #fire {
+    position: fixed;
+    bottom: 40px;
+    right: 32px;
+    width: 96px;
+    height: 96px;
+    background: #c0392b;
+    border: 4px solid #fff;
+    border-radius: 50%;
+    color: #fff;
+    font-family: monospace;
+    font-weight: bold;
+    font-size: 18px;
+    touch-action: none;
+    user-select: none;
+  }
+  #fire:active { background: #e74c3c; }
+  .padbtn {
+    position: absolute;
+    width: 56px;
+    height: 56px;
+    background: rgba(255,255,255,0.15);
+    border: 3px solid #fff;
+    color: #fff;
+    font-family: monospace;
+    font-weight: bold;
+    font-size: 24px;
+    text-align: center;
+    line-height: 50px;
+  }
+  .padbtn:active { background: rgba(255,255,255,0.4); }
+  #pU { left: 52px; top: 0; }
+  #pD { left: 52px; top: 104px; }
+  #pL { left: 0; top: 52px; }
+  #pR { left: 104px; top: 52px; }
+  @media (hover: hover) and (pointer: fine) {
+    #pad, #fire { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="game"></canvas></div>
+<div id="pad">
+  <div class="padbtn" id="pU">^</div>
+  <div class="padbtn" id="pD">v</div>
+  <div class="padbtn" id="pL">&lt;</div>
+  <div class="padbtn" id="pR">&gt;</div>
+</div>
+<button id="fire">SQUIRT</button>
+<script>
+(() => {
+  // ====== Pixel canvas setup ======
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  ctx.imageSmoothingEnabled = false;
+
+  // Internal pixel resolution (8-bit feel)
+  const VW = 256;   // 16 cols
+  const VH = 224;   // 14 rows of play + HUD
+  const TILE = 16;
+  const COLS = 16;
+  const HUD_H = 16;
+  const PLAY_H = VH - HUD_H;
+  const ROWS = PLAY_H / TILE; // 13 rows of tiles
+
+  function resize() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const scale = Math.max(1, Math.floor(Math.min(w / VW, h / VH)));
+    canvas.width = VW;
+    canvas.height = VH;
+    canvas.style.width = (VW * scale) + 'px';
+    canvas.style.height = (VH * scale) + 'px';
+    ctx.imageSmoothingEnabled = false;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ====== Palette (NES-ish) ======
+  const C = {
+    sky:    '#5c94fc',
+    grass:  '#3cbcfc', // not used directly
+    grassG: '#80d010',
+    dirt1:  '#a85820',
+    dirt2:  '#8b3a0e',
+    dirt3:  '#6b2a08',
+    tunnel: '#2a1408',
+    rock1:  '#bcbcbc',
+    rock2:  '#7c7c7c',
+    rockD:  '#404040',
+    worm1:  '#fc7460',
+    worm2:  '#d8482c',
+    wormE:  '#000000',
+    pd1:    '#c87830',
+    pd2:    '#8b4513',
+    pdBel:  '#f0c878',
+    sq1:    '#74dc54',   // squiggle bright green
+    sq2:    '#2c8814',   // squiggle dark green
+    sqEye:  '#000000',
+    eye:    '#ffffff',
+    pupil:  '#000000',
+    squirt: '#a8e8ff',
+    help1:  '#7cd8fc',   // conjured helper worm
+    help2:  '#2c6cac',
+    steel:  '#c0c0d8',   // knight helm
+    steelD: '#6c6c8c',
+    magic1: '#a060fc',   // magician purple
+    magic2: '#5c2c9c',
+    prop1:  '#fc7460',   // propeller beanie
+    prop2:  '#3cbcfc',
+    coin1:  '#fce040',
+    coin2:  '#c89000',
+    slug1:  '#9cfc70',   // slugbuck bright green
+    slug2:  '#2c8814',
+    jest1:  '#fc4848',   // jester ant motley
+    jest2:  '#a060fc',
+    jestS:  '#c8a060',   // his face
+    antD:   '#2a1c10',
+    paper:  '#e8d0a0',   // wanted poster
+    paperD: '#7c5a2c',
+    horn1:  '#fcd000',   // king hornet yellow
+    horn2:  '#181008',   // ...and his black
+    wing:   '#bcd8f0',
+    lens:   '#2a4a6a',
+    mole1:  '#8b5a2b',   // queen mole brown
+    mole2:  '#4a2d10',
+    moleBel:'#c89060',
+    bowL:   '#fc6464',   // her red bow
+    bowD:   '#a01818',
+    text:   '#ffffff',
+    yellow: '#fce040',
+    red:    '#fc3030',
+    carrot: '#fc8c20',   // pointer carrot
+    candy:  '#ff9ec4',   // lollypop pink
+    ant1:   '#7a3a1c',   // worker ant
+    ted1:   '#d8a860',   // teddy bear, kept well clear of the prairie dog browns
+    ted2:   '#8a6030',
+  };
+
+  // ====== Tiles ======
+  // 0 = dirt, 1 = empty (tunnel), 2 = rock, 3 = falling rock
+  const DIRT = 0, EMPTY = 1, ROCK = 2, FALLING = 3;
+  let grid; // [r][c]
+
+  // Use a per-tile dirt variant for visual interest
+  let dirtSeed; // [r][c] -> small integer
+
+  function makeLevel(levelIdx) {
+    grid = [];
+    dirtSeed = [];
+    for (let r = 0; r < ROWS; r++) {
+      const row = [];
+      const seedRow = [];
+      for (let c = 0; c < COLS; c++) {
+        row.push(DIRT);
+        seedRow.push((Math.random() * 4) | 0);
+      }
+      grid.push(row);
+      dirtSeed.push(seedRow);
+    }
+    // Carve a starting chamber for the worm so all 4 directions work immediately
+    for (let r = 0; r < 2; r++) {
+      for (let c = 0; c < 3; c++) carve(r, c);
+    }
+    carve(2, 0); carve(2, 1);
+    // A couple of horizontal scratches
+    for (let i = 0; i < 3 + levelIdx; i++) {
+      const r = 2 + ((Math.random() * (ROWS - 3)) | 0);
+      const c0 = (Math.random() * (COLS - 4)) | 0;
+      const len = 2 + ((Math.random() * 4) | 0);
+      for (let k = 0; k < len; k++) carve(r, c0 + k);
+    }
+    // Place rocks
+    const nRocks = 4 + levelIdx;
+    let placed = 0, tries = 0;
+    while (placed < nRocks && tries < 200) {
+      tries++;
+      const r = 1 + ((Math.random() * (ROWS - 3)) | 0);
+      const c = (Math.random() * COLS) | 0;
+      if (grid[r][c] === DIRT && grid[r+1] && grid[r+1][c] === DIRT) {
+        grid[r][c] = ROCK;
+        placed++;
+      }
+    }
+  }
+
+  function carve(r, c) {
+    if (r >= 0 && r < ROWS && c >= 0 && c < COLS) grid[r][c] = EMPTY;
+  }
+
+  // ====== Entities ======
+  // Player worm: pixel-positioned, but movement is grid-aligned along axes.
+  const player = {
+    x: 0, y: 0,         // top-left pixel of 16x16 sprite (within play area)
+    dir: 'R',           // R, L, U, D
+    speed: 1.5,         // pixels per frame
+    alive: true,
+    squirting: false,
+    squirtTimer: 0,
+    squirtTarget: null,
+    invuln: 0,
+    bodyTrail: [],      // recent positions to draw worm body
+  };
+
+  // Prairie dogs
+  let pds = [];
+
+  function spawnPlayer() {
+    player.x = TILE;       // start one tile in so up/left aren't blocked by boundary
+    player.y = TILE;
+    player.dir = 'R';
+    player.alive = true;
+    player.invuln = 60;
+    player.squirting = false;
+    player.squirtTimer = 0;
+    player.squirtTarget = null;
+    player.bodyTrail = [];
+    player.speed = equipped === 'slugcrown' ? 2.1 : 1.5;
+  }
+
+  function minionSpeed(type, levelIdx) {
+    const diffSpd = [-0.2, 0, 0.15][difficulty];
+    const base = 0.4 + Math.random() * 0.15 + levelIdx * 0.03 + diffSpd;
+    if (type === 'pd')  return Math.max(0.2, base);
+    if (type === 'ant') return Math.max(0.25, base * 1.35);   // ants scurry
+    return Math.max(0.15, base * 0.6);                        // squiggles dawdle
+  }
+
+  function makeMinion(type, x, y, speed) {
+    return {
+      type, x, y,
+      dir: ['L','R','U','D'][(Math.random()*4)|0],
+      speed,
+      alive: true,
+      pumped: 0,          // 0..4 -> exploded
+      pumpDecay: 0,
+      stunned: 0,
+      thinkTimer: 0,
+      wiggle: 0,          // animation phase for squiggle
+    };
+  }
+
+  function spawnPDs(levelIdx) {
+    pds = [];
+    const diffN = [-1, 0, 1][difficulty];     // easy: -1, normal: 0, hard: +1
+    const n = Math.max(1, 2 + Math.min(4, levelIdx) + diffN);
+    const nSquiggle = 1 + Math.min(2, Math.floor(levelIdx / 2));
+    // Ants only start turning up once you are a burrow or two down
+    const nAnt = levelIdx < 2 ? 0 : Math.min(3, Math.floor(levelIdx / 2));
+    const spawn = (type) => {
+      let tries = 0;
+      while (tries < 80) {
+        tries++;
+        const r = 3 + ((Math.random() * (ROWS - 4)) | 0);
+        const c = 4 + ((Math.random() * (COLS - 5)) | 0);
+        if (grid[r][c] !== DIRT) continue;
+        grid[r][c] = EMPTY;
+        pds.push(makeMinion(type, c * TILE, r * TILE, minionSpeed(type, levelIdx)));
+        return true;
+      }
+      return false;
+    };
+    // Boss burrows come with a proper crowd on top of whatever the boss calls up
+    const bossSpawner = levelIdx >= JESTER_LEVEL ? spawnJester
+                      : levelIdx === QUEEN_LEVEL ? spawnQueen
+                      : levelIdx === KING_LEVEL ? spawnKing : null;
+    if (bossSpawner) {
+      bossSpawner();
+      spawn('pd');
+      spawn('pd');
+      spawn('pd');
+      spawn('squiggle');
+      spawn('squiggle');
+      spawn('ant');
+      spawn('ant');
+      return;
+    }
+    for (let i = 0; i < n; i++) spawn('pd');
+    for (let i = 0; i < nSquiggle; i++) spawn('squiggle');
+    for (let i = 0; i < nAnt; i++) spawn('ant');
+  }
+
+  // ====== The Queen Mole ======
+  // Twice the size of everything else, soaks several hits, and keeps calling
+  // up prairie dogs and squiggles until she goes down.
+  const KING_LEVEL = 5;
+  const QUEEN_LEVEL = 10;
+  const JESTER_LEVEL = 15;
+  const FINAL_LEVEL = JESTER_LEVEL;
+  const BOSS_SIZE = 32;
+  const QUEEN_SIZE = BOSS_SIZE;
+  const KING_SIZE = BOSS_SIZE;
+  const QUEEN_MAX_MINIONS = 8;
+  const QUEEN_SPAWN_GAP = 150;
+  const KING_MAX_MINIONS = 8;
+  const KING_SPAWN_GAP = 170;
+  const JESTER_MAX_MINIONS = 9;
+  const JESTER_SPAWN_GAP = 140;
+
+  function isBoss(p) {
+    return p.type === 'queen' || p.type === 'king' || p.type === 'jester';
+  }
+
+  // Both bosses get meaner once they are down to half health.
+  function enraged(p) { return p.hp <= p.maxHp / 2; }
+
+  // Bosses do not just sit there and take it. Hold one with a squirt and he
+  // winds up, then swings at the worm on the other end of the ink.
+  const LASH_TIME = 68;        // frames you can hold a boss before he swings
+  const LASH_TIME_RAGE = 48;   // an angry boss swings much sooner
+  const LASH_WINDUP = 20;      // telegraphed frames before the swing lands
+  function lashLimit(p) { return enraged(p) ? LASH_TIME_RAGE : LASH_TIME; }
+  function lashWinding(p) {
+    return !!p && isBoss(p) && p.lash > 0 && p.lash >= lashLimit(p) - LASH_WINDUP;
+  }
+
+  function spawnQueen() {
+    const qc = COLS - 4, qr = ROWS - 4;
+    for (let r = qr; r < qr + 2; r++) {
+      for (let c = qc; c < qc + 2; c++) carve(r, c);
+    }
+    const hp = 8 + difficulty * 2;
+    pds.push({
+      type: 'queen',
+      x: qc * TILE,
+      y: qr * TILE,
+      dir: 'L',
+      speed: 0.46 + difficulty * 0.1,
+      alive: true,
+      pumped: 0,
+      pumpDecay: 0,
+      stunned: 0,
+      thinkTimer: 0,
+      wiggle: 0,
+      hp, maxHp: hp,
+      lash: 0,
+      hurtFlash: 0,
+      spawnTimer: 120,
+    });
+  }
+
+  function spawnKing() {
+    const kc = COLS - 4, kr = 2;
+    for (let r = kr; r < kr + 2; r++) {
+      for (let c = kc; c < kc + 2; c++) carve(r, c);
+    }
+    const hp = 6 + difficulty;
+    pds.push({
+      type: 'king',
+      x: kc * TILE,
+      y: kr * TILE,
+      dir: 'L',
+      speed: 0.42 + difficulty * 0.1,
+      alive: true,
+      pumped: 0,
+      pumpDecay: 0,
+      stunned: 0,
+      thinkTimer: 0,
+      wiggle: 0,
+      hp, maxHp: hp,
+      lash: 0,
+      hurtFlash: 0,
+      spawnTimer: 140,
+      mode: 'hover',
+      phase: 90,
+      vx: 0, vy: 0,
+    });
+  }
+
+  function spawnJester() {
+    const jc = 2, jr = ROWS - 4;
+    for (let r = jr; r < jr + 2; r++) {
+      for (let c = jc; c < jc + 2; c++) carve(r, c);
+    }
+    const hp = 10 + difficulty * 2;
+    pds.push({
+      type: 'jester',
+      x: jc * TILE,
+      y: jr * TILE,
+      dir: 'R',
+      speed: 0.52 + difficulty * 0.1,
+      alive: true,
+      pumped: 0,
+      pumpDecay: 0,
+      stunned: 0,
+      thinkTimer: 0,
+      wiggle: 0,
+      hp, maxHp: hp,
+      lash: 0,
+      hurtFlash: 0,
+      spawnTimer: 120,
+      mode: 'walk',
+      phase: 200,
+    });
+  }
+
+  // He will not hop away mid-squirt: updatePDs skips a boss that is being
+  // pumped, so moveJester never runs while you have hold of him.
+  function jesterHop(p) {
+    const spots = [];
+    for (let i = 0; i < 50; i++) {
+      const r = (Math.random() * (ROWS - 1)) | 0;
+      const c = (Math.random() * (COLS - 1)) | 0;
+      const x = c * TILE, y = r * TILE;
+      if (!canOccupy(x, y, BOSS_SIZE)) continue;
+      spots.push({ x, y, d: Math.hypot(x - player.x, y - player.y) });
+    }
+    if (!spots.length) return;
+    spots.sort((a, b) => a.d - b.d);
+    const pick = spots.find(s => s.d > 40) || spots[0];
+    p.x = pick.x;
+    p.y = pick.y;
+    carveAt(p.x, p.y, BOSS_SIZE);
+  }
+
+  function moveJester(p) {
+    const rage = enraged(p);
+    p.wiggle += 0.3;
+
+    p.spawnTimer--;
+    if (p.spawnTimer <= 0) {
+      p.spawnTimer = rage ? Math.round(JESTER_SPAWN_GAP * 0.6) : JESTER_SPAWN_GAP;
+      bossCallsForHelp(p, JESTER_MAX_MINIONS);
+    }
+
+    p.phase--;
+    if (p.phase <= 0) {
+      if (p.mode === 'walk') {
+        p.mode = 'vanish';
+        p.phase = 30;
+      } else if (p.mode === 'vanish') {
+        jesterHop(p);
+        p.mode = 'appear';
+        p.phase = 20;
+      } else {
+        p.mode = 'walk';
+        p.phase = rage ? 150 : 220;
+      }
+    }
+    if (p.mode !== 'walk') return;     // he holds still while popping in and out
+
+    p.thinkTimer--;
+    const ax = Math.round(p.x / TILE) * TILE;
+    const ay = Math.round(p.y / TILE) * TILE;
+    const aligned = Math.abs(p.x - ax) < 0.6 && Math.abs(p.y - ay) < 0.6;
+    if (aligned && p.thinkTimer <= 0) {
+      p.thinkTimer = 26;
+      const dxp = (player.x + 8) - entCX(p);
+      const dyp = (player.y + 8) - entCY(p);
+      const order = Math.abs(dxp) > Math.abs(dyp)
+        ? [dxp > 0 ? 'R' : 'L', dyp > 0 ? 'D' : 'U']
+        : [dyp > 0 ? 'D' : 'U', dxp > 0 ? 'R' : 'L'];
+      const open = ['L','R','U','D'].filter(d => {
+        const mx = d === 'L' ? -1 : d === 'R' ? 1 : 0;
+        const my = d === 'U' ? -1 : d === 'D' ? 1 : 0;
+        return canOccupy(ax + mx * TILE, ay + my * TILE, BOSS_SIZE);
+      });
+      const pick = order.find(d => open.includes(d));
+      if (pick) p.dir = pick;
+      else if (open.length) p.dir = open[(Math.random() * open.length) | 0];
+    }
+
+    let dx = 0, dy = 0;
+    if (p.dir === 'L') dx = -1;
+    else if (p.dir === 'R') dx = 1;
+    else if (p.dir === 'U') dy = -1;
+    else dy = 1;
+    if (dx !== 0) p.y = ay;
+    if (dy !== 0) p.x = ax;
+
+    const sp = p.speed * (rage ? 1.3 : 1);
+    const nx = p.x + dx * sp;
+    const ny = p.y + dy * sp;
+    if (canOccupy(nx, ny, BOSS_SIZE)) {
+      p.x = nx;
+      p.y = ny;
+      carveAt(p.x, p.y, BOSS_SIZE);
+    } else {
+      p.x = ax;            // back onto the grid, so he can pick a new way
+      p.y = ay;
+      p.thinkTimer = 0;
+    }
+  }
+
+  function bossCallsForHelp(q, cap) {
+    const court = pds.filter(p => p.alive && !isBoss(p)).length;
+    if (court >= cap) return;
+    const qc = Math.round(q.x / TILE), qr = Math.round(q.y / TILE);
+    const spots = [];
+    for (let r = qr - 1; r <= qr + 2; r++) {
+      for (let c = qc - 1; c <= qc + 2; c++) {
+        if (r < 0 || r >= ROWS || c < 0 || c >= COLS) continue;
+        if (grid[r][c] === ROCK || grid[r][c] === FALLING) continue;
+        spots.push([r, c]);
+      }
+    }
+    if (!spots.length) return;
+    const [r, c] = spots[(Math.random() * spots.length) | 0];
+    grid[r][c] = EMPTY;
+    const roll = Math.random();
+    const type = roll < 0.4 ? 'pd' : roll < 0.75 ? 'squiggle' : 'ant';
+    pds.push(makeMinion(type, c * TILE, r * TILE, minionSpeed(type, level)));
+  }
+
+  function moveQueen(p) {
+    const rage = enraged(p);
+    p.spawnTimer--;
+    if (p.spawnTimer <= 0) {
+      p.spawnTimer = rage ? Math.round(QUEEN_SPAWN_GAP * 0.6) : QUEEN_SPAWN_GAP;
+      bossCallsForHelp(p, QUEEN_MAX_MINIONS);
+    }
+
+    p.thinkTimer--;
+    const ax = Math.round(p.x / TILE) * TILE;
+    const ay = Math.round(p.y / TILE) * TILE;
+    const aligned = Math.abs(p.x - ax) < 0.6 && Math.abs(p.y - ay) < 0.6;
+    if (aligned && p.thinkTimer <= 0) {
+      p.thinkTimer = 30;
+      const dxp = (player.x + 8) - (p.x + QUEEN_SIZE / 2);
+      const dyp = (player.y + 8) - (p.y + QUEEN_SIZE / 2);
+      const order = Math.abs(dxp) > Math.abs(dyp)
+        ? [dxp > 0 ? 'R' : 'L', dyp > 0 ? 'D' : 'U']
+        : [dyp > 0 ? 'D' : 'U', dxp > 0 ? 'R' : 'L'];
+      const open = ['L','R','U','D'].filter(d => {
+        const mx = d === 'L' ? -1 : d === 'R' ? 1 : 0;
+        const my = d === 'U' ? -1 : d === 'D' ? 1 : 0;
+        return canOccupy(ax + mx * TILE, ay + my * TILE, QUEEN_SIZE);
+      });
+      const pick = order.find(d => open.includes(d));
+      if (pick) p.dir = pick;
+      else if (open.length) p.dir = open[(Math.random() * open.length) | 0];
+    }
+
+    let dx = 0, dy = 0;
+    if (p.dir === 'L') dx = -1;
+    else if (p.dir === 'R') dx = 1;
+    else if (p.dir === 'U') dy = -1;
+    else dy = 1;
+    if (dx !== 0) p.y = ay;
+    if (dy !== 0) p.x = ax;
+
+    const sp = p.speed * (rage ? 1.35 : 1);
+    const nx = p.x + dx * sp;
+    const ny = p.y + dy * sp;
+    if (canOccupy(nx, ny, QUEEN_SIZE)) {
+      p.x = nx;
+      p.y = ny;
+      carveAt(p.x, p.y, QUEEN_SIZE);
+    } else {
+      p.x = ax;            // back onto the grid, so she can pick a new way
+      p.y = ay;
+      p.thinkTimer = 0;
+    }
+  }
+
+  // The King Hornet flies: dirt does not slow him and he carves nothing, so
+  // you cannot wall him out. Only rocks and the edges stop him. He drifts in,
+  // winds up, dashes at you, then has to catch his breath - that pause is
+  // when you squirt him.
+  function moveKing(p) {
+    const rage = enraged(p);
+    p.wiggle += 0.6;
+
+    p.spawnTimer--;
+    if (p.spawnTimer <= 0) {
+      p.spawnTimer = rage ? Math.round(KING_SPAWN_GAP * 0.6) : KING_SPAWN_GAP;
+      bossCallsForHelp(p, KING_MAX_MINIONS);
+    }
+
+    p.phase--;
+    if (p.phase <= 0) {
+      if (p.mode === 'hover') {
+        p.mode = 'wind';
+        p.phase = rage ? 16 : 24;
+      } else if (p.mode === 'wind') {
+        const dxp = (player.x + 8) - entCX(p);
+        const dyp = (player.y + 8) - entCY(p);
+        const len = Math.hypot(dxp, dyp) || 1;
+        p.vx = dxp / len;
+        p.vy = dyp / len;
+        p.mode = 'dash';
+        p.phase = 34;
+      } else if (p.mode === 'dash') {
+        p.mode = 'rest';
+        p.phase = rage ? 34 : 54;      // the opening
+      } else {
+        p.mode = 'hover';
+        p.phase = rage ? 40 : 70;
+      }
+    }
+
+    let dx = 0, dy = 0, sp = 0;
+    if (p.mode === 'hover') {
+      const dxp = (player.x + 8) - entCX(p);
+      const dyp = (player.y + 8) - entCY(p);
+      const len = Math.hypot(dxp, dyp) || 1;
+      dx = dxp / len;
+      dy = dyp / len;
+      sp = p.speed * (rage ? 1.3 : 1);
+    } else if (p.mode === 'dash') {
+      dx = p.vx;
+      dy = p.vy;
+      sp = p.speed * (rage ? 5.5 : 4.5);
+    }
+    if (sp <= 0) return;
+
+    // Only the edges of the burrow stop him - rocks and dirt do not.
+    const nx = Math.max(0, Math.min(COLS * TILE - KING_SIZE, p.x + dx * sp));
+    const ny = Math.max(0, Math.min(PLAY_H - KING_SIZE, p.y + dy * sp));
+    if (p.mode === 'dash' && nx === p.x && ny === p.y) p.phase = 0;   // hit the wall
+    p.x = nx;
+    p.y = ny;
+  }
+
+  // Centre and contact radius of any enemy, so the big one is handled too.
+  function entHalf(p) { return isBoss(p) ? BOSS_SIZE / 2 : 8; }
+  function entCX(p) { return p.x + entHalf(p); }
+  function entCY(p) { return p.y + entHalf(p); }
+
+  // One full inflation landed on `tgt`. Returns true if the squirter lets go.
+  function inflateHit(tgt, byHelper) {
+    if (!isBoss(tgt)) {
+      tgt.alive = false;
+      awardKill(tgt, 'pop', byHelper);
+      return true;
+    }
+    tgt.hp--;
+    tgt.lash = 0;
+    tgt.pumped = 0;
+    tgt.pumpDecay = 0;
+    tgt.hurtFlash = 36;
+    tgt.stunned = 45;
+    if (tgt.hp <= 0) {
+      tgt.alive = false;
+      awardKill(tgt, 'pop', byHelper);
+    }
+    return true;
+  }
+
+  // ====== Input ======
+  const keys = {};
+  window.addEventListener('keydown', e => {
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+    keys[e.key] = true;
+    if (e.repeat) return;
+    if (gameState === 'menu') {
+      handleMenuKey(e.key);
+    } else if (gameState === 'shop') {
+      handleShopKey(e.key);
+    } else if (gameState === 'cursors') {
+      handleCursorKey(e.key);
+    } else if (gameState === 'asm') {
+      handleAsmKey(e.key);
+    } else if (gameState === 'bosspick') {
+      handleBossPickKey(e.key);
+    } else if (gameState === 'code' || gameState === 'cheat') {
+      handleCodeKey(e.key);
+    } else if (gameState === 'howto') {
+      gameState = 'menu';
+    } else if (gameState === 'play') {
+      if (e.key === 'Escape') gameState = 'menu';
+    } else if (gameState !== 'play') {
+      // dead / win / over -> any key returns to menu (or continues flow)
+      if (gameState === 'over' || gameState === 'beat') gameState = 'menu';
+    }
+  });
+  window.addEventListener('keyup', e => { keys[e.key] = false; });
+  // Clear stuck keys if the window loses focus
+  window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+  // Touch pad
+  const pad = { U: false, D: false, L: false, R: false, fire: false };
+  function bindBtn(id, key) {
+    const el = document.getElementById(id);
+    const set = v => { pad[key] = v; };
+    el.addEventListener('touchstart', e => { e.preventDefault(); set(true); }, { passive: false });
+    el.addEventListener('touchend',   e => { e.preventDefault(); set(false); }, { passive: false });
+    el.addEventListener('touchcancel',e => { e.preventDefault(); set(false); }, { passive: false });
+    el.addEventListener('mousedown',  e => { e.preventDefault(); set(true); });
+    el.addEventListener('mouseup',    e => { e.preventDefault(); set(false); });
+    el.addEventListener('mouseleave', () => set(false));
+  }
+  bindBtn('pU','U'); bindBtn('pD','D'); bindBtn('pL','L'); bindBtn('pR','R');
+  bindBtn('fire','fire');
+
+  // Tap canvas: advance through menus / start a new run on game over
+  function onCanvasTap(ev) {
+    if (gameState === 'menu') {
+      handleMenuTap(ev);
+    } else if (gameState === 'shop') {
+      handleShopTap(ev);
+    } else if (gameState === 'cursors') {
+      handleCursorTap(ev);
+    } else if (gameState === 'asm') {
+      handleAsmTap(ev);
+    } else if (gameState === 'bosspick') {
+      handleBossPickTap(ev);
+    } else if (gameState === 'play') {
+      const mb = menuBtnBounds;
+      const [mx, my] = canvasPoint(ev);
+      if (mx >= mb.x && mx <= mb.x + mb.w && my >= mb.y && my <= mb.y + mb.h) gameState = 'menu';
+    } else if (gameState === 'code' || gameState === 'cheat') {
+      handleKeypadTap(ev);
+    } else if (gameState === 'howto' || gameState === 'over' || gameState === 'beat') {
+      gameState = 'menu';
+    }
+  }
+  canvas.addEventListener('touchstart', e => { e.preventDefault(); onCanvasTap(e); }, { passive: false });
+  canvas.addEventListener('mousedown', e => { e.preventDefault(); onCanvasTap(e); });
+
+  function pressed(k) {
+    if (k === 'L') return keys['ArrowLeft']  || keys['a'] || keys['A'] || pad.L;
+    if (k === 'R') return keys['ArrowRight'] || keys['d'] || keys['D'] || pad.R;
+    if (k === 'U') return keys['ArrowUp']    || keys['w'] || keys['W'] || pad.U;
+    if (k === 'D') return keys['ArrowDown']  || keys['s'] || keys['S'] || pad.D;
+    if (k === 'F') return keys[' '] || keys['z'] || keys['Z'] || pad.fire;
+  }
+
+  // ====== Helpers ======
+  function tileAt(x, y) {
+    const c = Math.floor(x / TILE);
+    const r = Math.floor(y / TILE);
+    if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return EMPTY;
+    return grid[r][c];
+  }
+  function setTile(r, c, v) {
+    if (r >= 0 && r < ROWS && c >= 0 && c < COLS) grid[r][c] = v;
+  }
+
+  // Check if the 16x16 entity at (x,y) is fully inside non-rock tiles.
+  function canOccupy(x, y, size) {
+    const s = size || TILE;
+    if (x < 0 || y < 0 || x + s > COLS*TILE || y + s > PLAY_H) return false;
+    // Sample the edges, plus every tile boundary in between for big bodies
+    const xs = [x+1], ys = [y+1];
+    for (let o = TILE; o < s; o += TILE) { xs.push(x+o); ys.push(y+o); }
+    xs.push(x+s-1); ys.push(y+s-1);
+    for (const cy of ys) {
+      for (const cx of xs) {
+        const t = tileAt(cx, cy);
+        if (t === ROCK || t === FALLING) return false;
+      }
+    }
+    return true;
+  }
+
+  // Carve dirt under the entity's footprint.
+  function carveAt(x, y, size) {
+    const s = size || TILE;
+    const c0 = Math.floor((x+2) / TILE);
+    const r0 = Math.floor((y+2) / TILE);
+    const c1 = Math.floor((x+s-3) / TILE);
+    const r1 = Math.floor((y+s-3) / TILE);
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        if (r >= 0 && r < ROWS && c >= 0 && c < COLS && grid[r][c] === DIRT) {
+          grid[r][c] = EMPTY;
+        }
+      }
+    }
+  }
+
+  // ====== Game flow ======
+  let level = 1;
+  let score = 0;
+  let lives = 3;
+  let gameState = 'menu'; // menu, howto, shop, play, dead, win, over
+  let stateTimer = 0;
+  let deathCause = 'chomp'; // 'chomp' or 'squish'
+  let rocks = []; // active falling rock physics objects: {x,y,vy,r,c,landed}
+
+  // ====== Coins, shop and hats ======
+  // Coins and hats persist between runs; only one hat can be worn at a time.
+  const HATS = [
+    { id: 'none',      name: 'NO HAT',      cost: 0,   cur: 'coin', desc: 'PLAIN WORM. NO BONUS.' },
+    { id: 'armor',     name: 'KNIGHT HELM', cost: 50,  cur: 'coin', desc: 'ROCKS CANT SQUISH YOU.' },
+    { id: 'magic',     name: 'MAGIC HAT',   cost: 100, cur: 'coin', desc: 'SUMMONS A HELPER WORM.' },
+    { id: 'propeller', name: 'PROPELLER',   cost: 50,  cur: 'coin', desc: 'START WITH ONE EXTRA LIFE.' },
+    { id: 'slugcrown', name: 'SLUG CROWN',  cost: 10,  cur: 'slug', desc: 'DIG AND MOVE MUCH FASTER.' },
+    { id: 'cowboy',    name: 'COWBOY HAT',  cost: 75,  cur: 'coin', desc: 'YOUR INK REACHES FURTHER.' },
+    { id: 'party',     name: 'PARTY HAT',   cost: 120, cur: 'coin', desc: 'POPS LAND ONE SQUIRT SOONER.' },
+    { id: 'space',     name: 'SPACE HELMET',cost: 20,  cur: 'slug', desc: 'ONE FREE HIT EVERY BURROW.' },
+    { id: 'mushroom',  name: 'MUSHROOM CAP',cost: 85,  cur: 'coin', desc: 'POPS PUFF OUT STUNNING SPORES.' },
+    { id: 'bow',       name: 'THE BOW',     cost: 0,   cur: 'unlock',
+      desc: 'POP MINIONS IN ONE SQUIRT.',
+      lockedDesc: 'BEAT THE QUEEN MOLE TO UNLOCK.' },
+    { id: 'shades',    name: 'SUNGLASSES',  cost: 0,   cur: 'unlock',
+      desc: 'ENEMIES LOSE TRACK OF YOU.',
+      lockedDesc: 'BEAT THE KING HORNET TO UNLOCK.' },
+    { id: 'jester',    name: 'JESTER CAP',  cost: 0,   cur: 'unlock',
+      desc: 'EVERY POP PAYS DOUBLE.',
+      lockedDesc: 'BEAT THE JESTER ANT TO UNLOCK.' },
+  ];
+
+  // Pointers for the menus. Pure decoration - none of them change the game.
+  const CURSORS = [
+    { id: 'worm',   name: 'WORM',        cost: 0,  cur: 'coin', desc: 'THE ORIGINAL LITTLE WORM.' },
+    { id: 'pd',     name: 'PRAIRIE DOG', cost: 35, cur: 'coin', desc: 'THE ENEMY, WORKING FOR YOU.' },
+    { id: 'squig',  name: 'SQUIGGLE',    cost: 8,  cur: 'slug', desc: 'A LITTLE GREEN WIGGLE.' },
+    { id: 'ant',    name: 'ANT',         cost: 30, cur: 'coin', desc: 'ONE OF THE LITTLE BITERS.' },
+    { id: 'rock',   name: 'ROCK',        cost: 30, cur: 'coin', desc: 'IT DOESNT POINT. ITS A ROCK.' },
+    { id: 'hand',   name: 'POINTY HAND', cost: 20, cur: 'coin', desc: 'A HAND THAT POINTS THE WAY.' },
+    { id: 'arrow',  name: 'ARROW',       cost: 25, cur: 'coin', desc: 'STRAIGHT TO THE POINT.' },
+    { id: 'carrot', name: 'CARROT',      cost: 40, cur: 'coin', desc: 'A SNACK THAT POINTS.' },
+    { id: 'lolly',  name: 'LOLLYPOP',    cost: 35, cur: 'coin', desc: 'STICKY, BUT IT POINTS.' },
+    { id: 'cane',   name: 'CANDY CANE',  cost: 40, cur: 'coin', desc: 'MINTY AND STRIPED.' },
+    { id: 'choc',   name: 'CHOCOLATE',   cost: 12, cur: 'slug', desc: 'DONT LEAVE IT IN THE SUN.' },
+    { id: 'burger', name: 'HAMBURGER',   cost: 10, cur: 'slug', desc: 'LUNCH, WITH A POINT.' },
+    { id: 'pizza',  name: 'PIZZA',       cost: 45, cur: 'coin', desc: 'A SLICE WITH A POINT.' },
+    { id: 'donut',  name: 'DONUT',       cost: 35, cur: 'coin', desc: 'ROUND, WITH A HOLE.' },
+    { id: 'icecrm', name: 'ICE CREAM',    cost: 40, cur: 'coin', desc: 'EAT IT BEFORE IT MELTS.' },
+    { id: 'cookie', name: 'COOKIE',       cost: 30, cur: 'coin', desc: 'ONE COOKIE, NO CRUMBS.' },
+    { id: 'fries',  name: 'FRENCH FRIES', cost: 35, cur: 'coin', desc: 'HOT, SALTY AND POINTY.' },
+    { id: 'cake',   name: 'CUPCAKE',      cost: 40, cur: 'coin', desc: 'ICING ON TOP.' },
+    { id: 'sushi',  name: 'SUSHI',        cost: 14, cur: 'slug', desc: 'VERY FANCY POINTING.' },
+    { id: 'teddy',  name: 'TEDDY BEAR',   cost: 40, cur: 'coin', desc: 'A FRIEND WHO POINTS.' },
+    { id: 'sun',    name: 'SUN',          cost: 55, cur: 'coin', desc: 'BRIGHT, DOWN A DARK HOLE.' },
+    { id: 'moon',   name: 'MOON',         cost: 55, cur: 'coin', desc: 'FOR LATE NIGHT DIGGING.' },
+    { id: 'rocket', name: 'ROCKET',      cost: 60, cur: 'coin', desc: 'POINTS AT THINGS VERY FAST.' },
+    { id: 'star',   name: 'GOLD STAR',   cost: 90, cur: 'coin', desc: 'FOR POINTING IN STYLE.' },
+    { id: 'coin',   name: 'COIN',        cost: 45, cur: 'coin', desc: 'POINT WITH YOUR MONEY.' },
+    { id: 'buck',   name: 'SLUGBUCK',    cost: 12, cur: 'slug', desc: 'THE SLUGS FINEST CURRENCY.' },
+    { id: 'slug',   name: 'SLUG',        cost: 6,  cur: 'slug', desc: 'THE ASM SLUGS LITTLE COUSIN.' },
+    { id: 'crown',  name: 'TINY CROWN',  cost: 15, cur: 'slug', desc: 'POINT LIKE ROYALTY.' },
+  ];
+  let coins = 0;
+  let slugs = 0;
+  let runCoins = 0;      // coins picked up in the current run, shown on game over
+  let runSlugs = 0;
+  let owned = { none: true };
+  let equipped = 'none';
+  let cursorsOwned = { worm: true };
+  let cursorEquipped = 'worm';
+  let coinFlash = 0;     // brief HUD blink when coins come in
+  let slugFlash = 0;
+  let armorFlash = 0;    // 'CLANG!' banner when the helm eats a rock
+  let helperGoneMsg = 0; // banner when the conjured worm runs out of lives
+  let domeFlash = 0;     // 'THE DOME CRACKS!' when the space helmet saves you
+  let shieldUsed = false;// the space helmet is good for one hit per burrow
+  let bossGuardMsg = 0;  // reminder that rocks do nothing to a boss
+  let bossWin = { title: '', prize: '' };   // which boss the clear screen is for
+
+  // Coins paid per kill. Rock crushes pay better than pops.
+  const COIN_VALUES = {
+    pop:  { pd: 2, squiggle: 1, ant: 2 },
+    rock: { pd: 5, squiggle: 3, ant: 4 },
+  };
+
+  // Slugbucks are the rare currency: only the slug-ish squiggles drop them.
+  const SLUG_VALUES = { pop: 1, rock: 2 };
+
+  // The mushroom cap: anything you pop puffs out spores that freeze its
+  // neighbours. Bosses are far too big to care.
+  let sporeFlash = 0;
+  let sporeAt = { x: 0, y: 0 };
+
+  function sporeBurst(src) {
+    const cx = entCX(src), cy = entCY(src);
+    for (const p of pds) {
+      if (!p.alive || p === src || isBoss(p)) continue;
+      if (Math.hypot(entCX(p) - cx, entCY(p) - cy) < TILE * 2.6) {
+        p.stunned = Math.max(p.stunned, 110);
+      }
+    }
+    sporeFlash = 26;
+    sporeAt = { x: cx, y: cy };
+  }
+
+  // Score + coins for one dead enemy. `byHelper` kills score but never pay out.
+  function awardKill(target, how, byHelper) {
+    if (!byHelper && equipped === 'mushroom') sporeBurst(target);
+    if (isBoss(target)) {
+      const tier = target.type === 'jester' ? 2 : target.type === 'queen' ? 1 : 0;
+      score += [5000, 8000, 12000][tier];
+      if (byHelper) return;
+      let payCoins = [50, 90, 150][tier];
+      let paySlugs = [10, 18, 30][tier];
+      if (equipped === 'jester') { payCoins *= 2; paySlugs *= 2; }
+      coins += payCoins;
+      runCoins += payCoins;
+      slugs = Math.min(99999, slugs + paySlugs);
+      runSlugs += paySlugs;
+      coinFlash = 60;
+      slugFlash = 60;
+      saveProgress();
+      return;
+    }
+    if (how === 'rock') {
+      score += target.type === 'squiggle' ? 250 : target.type === 'ant' ? 350 : 500;
+    } else {
+      score += target.type === 'squiggle' ? 100 : target.type === 'ant' ? 150 : 200;
+    }
+    if (byHelper) return;
+    const bonus = equipped === 'jester' ? 2 : 1;   // the cap pays double
+    const kind = COIN_VALUES[how][target.type] !== undefined ? target.type : 'pd';
+    const pay = COIN_VALUES[how][kind] * bonus;
+    coins += pay;
+    runCoins += pay;
+    coinFlash = 24;
+    if (target.type === 'squiggle') {
+      const slugPay = SLUG_VALUES[how] * bonus;
+      slugs += slugPay;
+      runSlugs += slugPay;
+      slugFlash = 24;
+    }
+    saveProgress();
+  }
+
+  const SAVE_KEY = 'earthworm.save.v1';
+  function saveProgress() {
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify({
+        coins, slugs, owned, equipped, cursorsOwned, cursorEquipped,
+      }));
+    } catch (e) { /* storage blocked - play on without saving */ }
+  }
+  function loadProgress() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      if (typeof d.coins === 'number' && isFinite(d.coins)) coins = Math.max(0, d.coins | 0);
+      if (typeof d.slugs === 'number' && isFinite(d.slugs)) slugs = Math.max(0, d.slugs | 0);
+      if (d.owned && typeof d.owned === 'object') owned = Object.assign({ none: true }, d.owned);
+      if (typeof d.equipped === 'string' && owned[d.equipped] && HATS.some(h => h.id === d.equipped)) {
+        equipped = d.equipped;
+      }
+      if (d.cursorsOwned && typeof d.cursorsOwned === 'object') {
+        cursorsOwned = Object.assign({ worm: true }, d.cursorsOwned);
+      }
+      if (typeof d.cursorEquipped === 'string' && cursorsOwned[d.cursorEquipped]
+          && CURSORS.some(c => c.id === d.cursorEquipped)) {
+        cursorEquipped = d.cursorEquipped;
+      }
+    } catch (e) { /* missing or corrupt save - start fresh */ }
+  }
+
+  // ====== Menu ======
+  const MENU_ITEMS = ['PLAY', 'SHOP', 'CURSORS', 'ASM', 'HOW TO PLAY', 'DIFFICULTY'];
+  const M_PLAY = 0, M_SHOP = 1, M_CURSORS = 2, M_ASM = 3, M_HOWTO = 4, M_DIFF = 5;
+  const DIFF_NAMES = ['EASY', 'NORMAL', 'HARD'];
+  let menuIndex = 0;
+  let difficulty = 1; // 0=easy 1=normal 2=hard
+  // Pixel bounds for tap detection on menu items (set during draw)
+  const menuBounds = [];
+
+  function handleMenuKey(key) {
+    if (key === 'ArrowUp' || key === 'w' || key === 'W') {
+      menuIndex = (menuIndex + MENU_ITEMS.length - 1) % MENU_ITEMS.length;
+    } else if (key === 'ArrowDown' || key === 's' || key === 'S') {
+      menuIndex = (menuIndex + 1) % MENU_ITEMS.length;
+    } else if (key === 'ArrowLeft' || key === 'a' || key === 'A') {
+      if (menuIndex === M_DIFF) difficulty = (difficulty + DIFF_NAMES.length - 1) % DIFF_NAMES.length;
+    } else if (key === 'ArrowRight' || key === 'd' || key === 'D') {
+      if (menuIndex === M_DIFF) difficulty = (difficulty + 1) % DIFF_NAMES.length;
+    } else if (key === 'c' || key === 'C') {
+      openCodeScreen('coins');
+    } else if (key === 'b' || key === 'B') {
+      openCodeScreen('boss');
+    } else if (key === 'Enter' || key === ' ' || key === 'z' || key === 'Z') {
+      activateMenu();
+    }
+  }
+
+  function activateMenu() {
+    if (menuIndex === M_PLAY) startGame();
+    else if (menuIndex === M_SHOP) { gameState = 'shop'; shopMsgTimer = 0; }
+    else if (menuIndex === M_CURSORS) { gameState = 'cursors'; shopMsgTimer = 0; }
+    else if (menuIndex === M_ASM) {
+      if (asmLocked()) return;     // the slug is still sulking
+      gameState = 'asm';
+      asmMsgTimer = 0;
+      slugTalk = 0;
+      slugPokes = 0;
+      slugAngry = 0;
+    }
+    else if (menuIndex === M_HOWTO) gameState = 'howto';
+    else if (menuIndex === M_DIFF) difficulty = (difficulty + 1) % DIFF_NAMES.length;
+  }
+
+  // ====== Shop ======
+  let shopIndex = 0;
+  let shopMsg = '';
+  let shopMsgColor = '#ffffff';
+  let shopMsgTimer = 0;
+  const shopBounds = [];
+  const SHOP_ROWS = HATS.length + 1;   // every hat, then BACK
+  const SHOP_VISIBLE = 9;              // as many as fit on one screen
+  let shopScroll = 0;
+
+  function clampShopScroll() {
+    const last = Math.max(0, SHOP_ROWS - SHOP_VISIBLE);
+    if (shopIndex < shopScroll) shopScroll = shopIndex;
+    else if (shopIndex > shopScroll + SHOP_VISIBLE - 1) {
+      shopScroll = shopIndex - SHOP_VISIBLE + 1;
+    }
+    shopScroll = Math.max(0, Math.min(last, shopScroll));
+  }
+
+  function shopMessage(msg, color) {
+    shopMsg = msg;
+    shopMsgColor = color;
+    shopMsgTimer = 120;
+  }
+
+  function handleShopKey(key) {
+    if (key === 'ArrowUp' || key === 'w' || key === 'W') {
+      shopIndex = (shopIndex + SHOP_ROWS - 1) % SHOP_ROWS;
+      clampShopScroll();
+    } else if (key === 'ArrowDown' || key === 's' || key === 'S') {
+      shopIndex = (shopIndex + 1) % SHOP_ROWS;
+      clampShopScroll();
+    } else if (key === 'Escape' || key === 'Backspace') {
+      gameState = 'menu';
+    } else if (key === 'Enter' || key === ' ' || key === 'z' || key === 'Z') {
+      activateShop();
+    }
+  }
+
+  function activateShop() {
+    if (shopIndex === HATS.length) { gameState = 'menu'; return; }
+    const h = HATS[shopIndex];
+    if (owned[h.id]) {
+      if (equipped === h.id) {
+        shopMessage('ALREADY WEARING IT', C.text);
+      } else {
+        equipped = h.id;
+        saveProgress();
+        shopMessage(h.id === 'none' ? 'HAT REMOVED' : 'HAT ON!', C.sq1);
+      }
+    } else if (h.cur === 'unlock') {
+      shopMessage(h.id === 'shades' ? 'BEAT THE KING HORNET FIRST'
+                : h.id === 'jester' ? 'BEAT THE JESTER ANT FIRST'
+                : 'BEAT THE QUEEN MOLE FIRST', C.red);
+    } else {
+      const purse = h.cur === 'slug' ? slugs : coins;
+      if (purse >= h.cost) {
+        if (h.cur === 'slug') slugs -= h.cost;
+        else coins -= h.cost;
+        owned[h.id] = true;
+        equipped = h.id;
+        saveProgress();
+        shopMessage('BOUGHT ' + h.name, C.yellow);
+      } else {
+        const unit = h.cur === 'slug' ? ' MORE SLUGBUCKS' : ' MORE COINS';
+        shopMessage('NEED ' + (h.cost - purse) + unit, C.red);
+      }
+    }
+  }
+
+  function handleShopTap(ev) {
+    const [px1, py1] = canvasPoint(ev);
+    for (let i = 0; i < shopBounds.length; i++) {
+      const b = shopBounds[i];
+      if (px1 >= b.x && px1 <= b.x + b.w && py1 >= b.y && py1 <= b.y + b.h) {
+        shopIndex = b.idx;
+        clampShopScroll();
+        activateShop();
+        return;
+      }
+    }
+  }
+
+  // ====== Cursor shop ======
+  // Same shape as the hat shop, but nothing here changes how the game plays.
+  let cursorIndex = 0;
+  let cursorScroll = 0;                     // first row shown, for the longer list
+  const cursorBounds = [];
+  const CURSOR_ROWS = CURSORS.length + 1;   // every pointer, then BACK
+  const CURSOR_VISIBLE = 10;                // as many as fit on one screen
+
+  // Keep the highlighted row inside the window, scrolling only when it has to.
+  function clampCursorScroll() {
+    const last = Math.max(0, CURSOR_ROWS - CURSOR_VISIBLE);
+    if (cursorIndex < cursorScroll) cursorScroll = cursorIndex;
+    else if (cursorIndex > cursorScroll + CURSOR_VISIBLE - 1) {
+      cursorScroll = cursorIndex - CURSOR_VISIBLE + 1;
+    }
+    cursorScroll = Math.max(0, Math.min(last, cursorScroll));
+  }
+
+  function handleCursorKey(key) {
+    if (key === 'ArrowUp' || key === 'w' || key === 'W') {
+      cursorIndex = (cursorIndex + CURSOR_ROWS - 1) % CURSOR_ROWS;
+      clampCursorScroll();
+    } else if (key === 'ArrowDown' || key === 's' || key === 'S') {
+      cursorIndex = (cursorIndex + 1) % CURSOR_ROWS;
+      clampCursorScroll();
+    } else if (key === 'Escape' || key === 'Backspace') {
+      gameState = 'menu';
+    } else if (key === 'Enter' || key === ' ' || key === 'z' || key === 'Z') {
+      activateCursorShop();
+    }
+  }
+
+  function activateCursorShop() {
+    if (cursorIndex === CURSORS.length) { gameState = 'menu'; return; }
+    const c = CURSORS[cursorIndex];
+    if (cursorsOwned[c.id]) {
+      if (cursorEquipped === c.id) {
+        shopMessage('ALREADY USING IT', C.text);
+      } else {
+        cursorEquipped = c.id;
+        saveProgress();
+        shopMessage(c.name + ' IT IS', C.sq1);
+      }
+    } else {
+      const purse = c.cur === 'slug' ? slugs : coins;
+      if (purse >= c.cost) {
+        if (c.cur === 'slug') slugs -= c.cost;
+        else coins -= c.cost;
+        cursorsOwned[c.id] = true;
+        cursorEquipped = c.id;
+        saveProgress();
+        shopMessage('BOUGHT ' + c.name, C.yellow);
+      } else {
+        const unit = c.cur === 'slug' ? ' MORE SLUGBUCKS' : ' MORE COINS';
+        shopMessage('NEED ' + (c.cost - purse) + unit, C.red);
+      }
+    }
+  }
+
+  function handleCursorTap(ev) {
+    const [px1, py1] = canvasPoint(ev);
+    for (let i = 0; i < cursorBounds.length; i++) {
+      const b = cursorBounds[i];
+      if (px1 >= b.x && px1 <= b.x + b.w && py1 >= b.y && py1 <= b.y + b.h) {
+        cursorIndex = b.idx;
+        clampCursorScroll();
+        activateCursorShop();
+        return;
+      }
+    }
+  }
+
+  // ====== Coin machine (code screen) ======
+  // The coin button on the title screen asks for a 4 digit code; get it right
+  // and you land on a keypad that pays out however many coins you type in.
+  const CHEAT_CODE = '2017';
+  const KEYPAD_KEYS = [['1','2','3'],['4','5','6'],['7','8','9'],['DEL','0','OK']];
+  const coinBtnBounds = { x: 6, y: HUD_H + 4, w: 24, h: 24 };
+  const wantedBtnBounds = { x: VW - 34, y: HUD_H + 2, w: 30, h: 28 };
+  const menuBtnBounds = { x: 228, y: 0, w: 28, h: HUD_H };
+  let codeDest = 'coins';         // what the keypad is guarding this time
+  const curBtnBounds = [];          // currency toggle on the payout screen
+  let grantCurrency = 'coin';
+  const keypadBounds = [];
+  const backBtnBounds = { x: 0, y: 0, w: 0, h: 0 };
+  let codeEntry = '';
+  let coinEntry = '';
+  let codeMsg = '';
+  let codeMsgColor = '#ffffff';
+  let codeMsgTimer = 0;
+
+  function codeMessage(msg, color) {
+    codeMsg = msg;
+    codeMsgColor = color;
+    codeMsgTimer = 150;
+  }
+
+  function openCodeScreen(dest) {
+    gameState = 'code';
+    codeDest = dest || 'coins';
+    codeEntry = '';
+    coinEntry = '';
+    codeMsgTimer = 0;
+  }
+
+  function keypadPress(key) {
+    if (gameState === 'code') {
+      if (key === 'DEL') codeEntry = codeEntry.slice(0, -1);
+      else if (key === 'OK') checkCode();
+      else if (codeEntry.length < 4) {
+        codeEntry += key;
+        if (codeEntry.length === 4) checkCode();
+      }
+    } else if (gameState === 'cheat') {
+      if (key === 'DEL') coinEntry = coinEntry.slice(0, -1);
+      else if (key === 'OK') grantCoins();
+      else if (coinEntry.length < 6) coinEntry += key;
+    }
+  }
+
+  function checkCode() {
+    if (codeEntry === CHEAT_CODE) {
+      if (codeDest === 'boss') {
+        gameState = 'bosspick';
+        bossPickIndex = 0;
+      } else {
+        gameState = 'cheat';
+        coinEntry = '';
+      }
+      codeMessage('CODE ACCEPTED', C.sq1);
+    } else {
+      codeMessage('WRONG CODE', C.red);
+    }
+    codeEntry = '';
+  }
+
+  function grantCoins() {
+    const n = parseInt(coinEntry, 10);
+    if (!coinEntry || !isFinite(n) || n <= 0) {
+      codeMessage('TYPE A NUMBER FIRST', C.red);
+      return;
+    }
+    if (grantCurrency === 'slug') {
+      slugs = Math.min(99999, slugs + n);
+      slugFlash = 60;
+      codeMessage('GOT ' + n + ' SLUGBUCKS', C.slug1);
+    } else {
+      coins = Math.min(999999, coins + n);
+      coinFlash = 60;
+      codeMessage('GOT ' + n + ' COINS', C.coin1);
+    }
+    saveProgress();
+    coinEntry = '';
+  }
+
+  function handleCodeKey(key) {
+    if (key === 'Escape') { gameState = 'menu'; return; }
+    if (gameState === 'cheat') {
+      if (key === 'ArrowLeft' || key === 'ArrowRight' || key === 'Tab') {
+        grantCurrency = grantCurrency === 'coin' ? 'slug' : 'coin';
+        return;
+      }
+    }
+    if (key === 'Backspace') { keypadPress('DEL'); return; }
+    if (key === 'Enter' || key === ' ') { keypadPress('OK'); return; }
+    if (/^[0-9]$/.test(key)) keypadPress(key);
+  }
+
+  function handleKeypadTap(ev) {
+    const [px1, py1] = canvasPoint(ev);
+    const b = backBtnBounds;
+    if (px1 >= b.x && px1 <= b.x + b.w && py1 >= b.y && py1 <= b.y + b.h) {
+      gameState = 'menu';
+      return;
+    }
+    if (gameState === 'cheat') {
+      for (const t of curBtnBounds) {
+        if (px1 >= t.x && px1 <= t.x + t.w && py1 >= t.y && py1 <= t.y + t.h) {
+          grantCurrency = t.cur;
+          return;
+        }
+      }
+    }
+    for (const k of keypadBounds) {
+      if (px1 >= k.x && px1 <= k.x + k.w && py1 >= k.y && py1 <= k.y + k.h) {
+        keypadPress(k.key);
+        return;
+      }
+    }
+  }
+
+  // ====== Wanted poster: jump straight to a boss ======
+  const WANTED = [
+    { label: 'KING HORNET', level: KING_LEVEL,   face: 'king' },
+    { label: 'QUEEN MOLE',  level: QUEEN_LEVEL,  face: 'queen' },
+    { label: 'JESTER ANT',  level: JESTER_LEVEL, face: 'jester' },
+  ];
+  const bossPickBounds = [];
+  let bossPickIndex = 0;
+
+  function startBossFight(lvl) {
+    score = 0;
+    lives = 3 + (equipped === 'propeller' ? 1 : 0);
+    level = lvl;
+    runCoins = 0;
+    runSlugs = 0;
+    beginLevel();
+    gameState = 'play';
+  }
+
+  function activateBossPick() {
+    if (bossPickIndex >= WANTED.length) { gameState = 'menu'; return; }
+    startBossFight(WANTED[bossPickIndex].level);
+  }
+
+  function handleBossPickKey(key) {
+    const rows = WANTED.length + 1;
+    if (key === 'Escape' || key === 'Backspace') { gameState = 'menu'; return; }
+    if (key === 'ArrowUp' || key === 'w' || key === 'W') {
+      bossPickIndex = (bossPickIndex + rows - 1) % rows;
+    } else if (key === 'ArrowDown' || key === 's' || key === 'S') {
+      bossPickIndex = (bossPickIndex + 1) % rows;
+    } else if (key === 'Enter' || key === ' ' || key === 'z' || key === 'Z') {
+      activateBossPick();
+    }
+  }
+
+  function handleBossPickTap(ev) {
+    const [px1, py1] = canvasPoint(ev);
+    for (const b of bossPickBounds) {
+      if (px1 >= b.x && px1 <= b.x + b.w && py1 >= b.y && py1 <= b.y + b.h) {
+        bossPickIndex = b.idx;
+        activateBossPick();
+        return;
+      }
+    }
+  }
+
+  // ====== ASM: the automatic slug machine ======
+  // Swaps between the two currencies both ways. The amount buttons always
+  // count slugbucks, whichever way the machine is pointing. The machine takes
+  // a cut on the way back, so slugbucks stay worth earning.
+  const ASM_RATE = 10;       // coins you get for one slugbuck
+  const ASM_BUY_RATE = 15;   // coins one slugbuck costs you
+  const ASM_AMOUNTS = [1, 5, 10, 'ALL'];
+  const ASM_DIRS = 2;
+  const ASM_IDX_AMOUNT0 = ASM_DIRS;
+  const ASM_IDX_SLUG = ASM_DIRS + ASM_AMOUNTS.length;
+  const ASM_IDX_BACK = ASM_IDX_SLUG + 1;
+  const ASM_ROWS = ASM_IDX_BACK + 1;
+  const SLUG_POS = { x: 115, y: 144, w: 26, h: 16 };
+  let asmDir = 'sell';       // 'sell' = bucks to coins, 'buy' = coins to bucks
+  const asmBounds = [];
+  let asmIndex = 0;
+  let asmMsg = '';
+  let asmMsgColor = '#ffffff';
+  let asmMsgTimer = 0;
+  let slugTalk = 0;          // frames the slug's speech bubble stays up
+
+  // He works through these in order, getting shorter-tempered as he goes.
+  const SLUG_LINES = [
+    'HELLO!',
+    'NICE TUNNELS.',
+    'SLIMY DAY ISNT IT?',
+    'BUSINESS IS SLOW.',
+    'I LIKE COINS.',
+    'THAT TICKLES.',
+    'STOP POKING ME.',
+    'I MEAN IT.',
+    'LAST WARNING...',
+  ];
+  const SLUG_ANGRY_LINE = 'THATS IT! GET OUT!';
+  const SLUG_LOCK_MS = 30000;      // how long he slams the shutters for
+  let slugLine = '';
+  let slugPokes = 0;               // pokes so far this visit
+  let slugAngry = 0;               // frames of fury before he throws you out
+  let asmLockUntil = 0;            // performance.now() deadline
+
+  function asmLocked() {
+    return performance.now() < asmLockUntil;
+  }
+  function asmLockSeconds() {
+    return Math.max(1, Math.ceil((asmLockUntil - performance.now()) / 1000));
+  }
+
+  function pokeSlug() {
+    if (slugAngry > 0) return;     // too late to apologise
+    slugPokes++;
+    if (slugPokes > SLUG_LINES.length) {
+      slugLine = SLUG_ANGRY_LINE;
+      slugTalk = 600;
+      slugAngry = 70;              // fume for about a second, then boot them
+      return;
+    }
+    slugLine = SLUG_LINES[slugPokes - 1];
+    slugTalk = 150;
+  }
+
+  function asmMessage(msg, color) {
+    asmMsg = msg;
+    asmMsgColor = color;
+    asmMsgTimer = 150;
+  }
+
+  function asmTransfer(which) {
+    if (asmDir === 'buy') return asmBuy(which);
+    if (slugs <= 0) {
+      asmMessage('NO SLUGBUCKS TO TRANSFER', C.red);
+      return;
+    }
+    const amt = which === 'ALL' ? slugs : which;
+    if (slugs < amt) {
+      asmMessage('ONLY ' + slugs + ' SLUGBUCKS LEFT', C.red);
+      return;
+    }
+    slugs -= amt;
+    coins = Math.min(999999, coins + amt * ASM_RATE);
+    coinFlash = 60;
+    slugFlash = 60;
+    saveProgress();
+    asmMessage('PAID OUT ' + (amt * ASM_RATE) + ' COINS', C.coin1);
+  }
+
+  // Coins back into slugbucks. `which` is how many slugbucks you want.
+  function asmBuy(which) {
+    const affordable = Math.floor(coins / ASM_BUY_RATE);
+    if (affordable <= 0) {
+      asmMessage('NEED ' + ASM_BUY_RATE + ' COINS FOR ONE', C.red);
+      return;
+    }
+    const amt = which === 'ALL' ? affordable : which;
+    if (amt > affordable) {
+      asmMessage('CAN ONLY AFFORD ' + affordable, C.red);
+      return;
+    }
+    coins -= amt * ASM_BUY_RATE;
+    slugs = Math.min(99999, slugs + amt);
+    coinFlash = 60;
+    slugFlash = 60;
+    saveProgress();
+    asmMessage('BOUGHT ' + amt + ' SLUGBUCKS', C.slug1);
+  }
+
+  function activateAsm() {
+    if (asmIndex < ASM_DIRS) {
+      asmDir = asmIndex === 0 ? 'sell' : 'buy';
+      asmMsgTimer = 0;
+    } else if (asmIndex < ASM_IDX_SLUG) {
+      asmTransfer(ASM_AMOUNTS[asmIndex - ASM_IDX_AMOUNT0]);
+    } else if (asmIndex === ASM_IDX_SLUG) {
+      pokeSlug();
+    } else {
+      gameState = 'menu';
+    }
+  }
+
+  function handleAsmKey(key) {
+    if (key === 'Escape' || key === 'Backspace') { gameState = 'menu'; return; }
+    if (key === 'ArrowLeft' || key === 'ArrowUp' || key === 'a' || key === 'A' || key === 'w' || key === 'W') {
+      asmIndex = (asmIndex + ASM_ROWS - 1) % ASM_ROWS;
+    } else if (key === 'ArrowRight' || key === 'ArrowDown' || key === 'd' || key === 'D' || key === 's' || key === 'S') {
+      asmIndex = (asmIndex + 1) % ASM_ROWS;
+    } else if (key === 'Enter' || key === ' ' || key === 'z' || key === 'Z') {
+      activateAsm();
+    }
+  }
+
+  function handleAsmTap(ev) {
+    const [px1, py1] = canvasPoint(ev);
+    for (const b of asmBounds) {
+      if (px1 >= b.x && px1 <= b.x + b.w && py1 >= b.y && py1 <= b.y + b.h) {
+        asmIndex = b.idx;
+        activateAsm();
+        return;
+      }
+    }
+  }
+
+  // Convert event coords to canvas internal-pixel coords
+  function canvasPoint(ev) {
+    const rect = canvas.getBoundingClientRect();
+    const cx = ev.touches ? ev.touches[0].clientX : ev.clientX;
+    const cy = ev.touches ? ev.touches[0].clientY : ev.clientY;
+    return [(cx - rect.left) * (VW / rect.width), (cy - rect.top) * (VH / rect.height)];
+  }
+
+  function handleMenuTap(ev) {
+    const [px, py] = canvasPoint(ev);
+    const cb = coinBtnBounds;
+    if (px >= cb.x && px <= cb.x + cb.w && py >= cb.y && py <= cb.y + cb.h) {
+      openCodeScreen('coins');
+      return;
+    }
+    const wb = wantedBtnBounds;
+    if (px >= wb.x && px <= wb.x + wb.w && py >= wb.y && py <= wb.y + wb.h) {
+      openCodeScreen('boss');
+      return;
+    }
+    for (let i = 0; i < menuBounds.length; i++) {
+      const b = menuBounds[i];
+      if (px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) {
+        menuIndex = i;
+        activateMenu();
+        return;
+      }
+    }
+  }
+
+  function startGame() {
+    score = 0;
+    lives = 3 + (equipped === 'propeller' ? 1 : 0);
+    level = 1;
+    runCoins = 0;
+    runSlugs = 0;
+    beginLevel();
+    gameState = 'play';
+  }
+
+  function beginLevel() {
+    makeLevel(level);
+    spawnPlayer();
+    spawnPDs(level);
+    rocks = [];
+    armorFlash = 0;
+    helperGoneMsg = 0;
+    sporeFlash = 0;
+    domeFlash = 0;
+    shieldUsed = false;    // a fresh dome every burrow
+    bossGuardMsg = 0;
+    helper = equipped === 'magic' ? makeHelper() : null;
+  }
+
+  // Returns true if the hit was fatal. The knight helm shrugs off rock hits,
+  // and the space helmet eats one hit of any kind per burrow.
+  function hitPlayer(cause) {
+    if (equipped === 'space' && !shieldUsed) {
+      shieldUsed = true;
+      player.invuln = 120;
+      domeFlash = 50;
+      if (cause === 'squish') escapeRock();
+      return false;
+    }
+    if (cause === 'squish' && equipped === 'armor') {
+      player.invuln = 90;
+      armorFlash = 50;
+      escapeRock();
+      return false;
+    }
+    player.alive = false;
+    loseLife(cause);
+    return true;
+  }
+
+  // Shove the worm clear of a falling rock so the landed rock can't entomb it.
+  function escapeRock() {
+    const ax = Math.round(player.x / TILE) * TILE;
+    const ay = Math.round(player.y / TILE) * TILE;
+    const tries = [[-TILE,0],[TILE,0],[0,-TILE],[0,TILE],[-TILE*2,0],[TILE*2,0]];
+    for (const [dx, dy] of tries) {
+      const nx = ax + dx, ny = ay + dy;
+      if (canOccupy(nx, ny)) {
+        player.x = nx;
+        player.y = ny;
+        carveAt(nx, ny);
+        return;
+      }
+    }
+    player.x = ax;
+    player.y = ay;
+  }
+
+  function loseLife(cause) {
+    deathCause = cause || 'chomp';
+    lives--;
+    if (lives <= 0) {
+      gameState = 'over';
+      stateTimer = 0;
+    } else {
+      gameState = 'dead';
+      stateTimer = 0;
+    }
+  }
+
+  function nextLevel() {
+    if (level >= JESTER_LEVEL) {
+      if (!owned.jester) {
+        owned.jester = true;
+        saveProgress();
+      }
+      gameState = 'beat';
+      stateTimer = 0;
+      return;
+    }
+    const prize = level === KING_LEVEL ? 'shades'
+                : level === QUEEN_LEVEL ? 'bow' : null;
+    if (prize) {
+      if (!owned[prize]) {
+        owned[prize] = true;
+        saveProgress();
+      }
+      bossWin = prize === 'shades'
+        ? { title: 'THE KING FALLS', prize: 'YOU TOOK HIS SHADES' }
+        : { title: 'THE QUEEN FALLS', prize: 'THE BOW IS YOURS' };
+      level++;
+      gameState = 'bosswin';
+      stateTimer = 0;
+      return;
+    }
+    level++;
+    gameState = 'win';
+    stateTimer = 0;
+  }
+
+  // ====== Update ======
+  function update() {
+    if (coinFlash > 0) coinFlash--;
+    if (slugFlash > 0) slugFlash--;
+    if (armorFlash > 0) armorFlash--;
+    if (domeFlash > 0) domeFlash--;
+    if (helperGoneMsg > 0) helperGoneMsg--;
+    if (sporeFlash > 0) sporeFlash--;
+    if (bossGuardMsg > 0) bossGuardMsg--;
+    if (shopMsgTimer > 0) shopMsgTimer--;
+    if (codeMsgTimer > 0) codeMsgTimer--;
+    if (asmMsgTimer > 0) asmMsgTimer--;
+    if (slugTalk > 0) slugTalk--;
+    if (slugAngry > 0) {
+      slugAngry--;
+      if (slugAngry === 0) {
+        if (gameState === 'asm') gameState = 'menu';
+        asmLockUntil = performance.now() + SLUG_LOCK_MS;
+        slugPokes = 0;
+        slugTalk = 0;
+      }
+    }
+    if (gameState === 'play') {
+      updatePlayer();
+      updateHelper();
+      updatePDs();
+      updateRocks();
+      // Win? On her floor only she matters - the court keeps coming.
+      const boss = pds.find(isBoss);
+      if (boss ? !boss.alive : pds.every(p => !p.alive)) nextLevel();
+    } else {
+      stateTimer++;
+      if (gameState === 'dead' && stateTimer > 90) {
+        beginLevel();
+        gameState = 'play';
+      } else if (gameState === 'win' && stateTimer > 90) {
+        beginLevel();
+        gameState = 'play';
+      } else if (gameState === 'bosswin' && stateTimer > 210) {
+        beginLevel();
+        gameState = 'play';
+      } else if (gameState === 'over' && stateTimer > 180) {
+        // wait for input
+      }
+    }
+  }
+
+  function updatePlayer() {
+    if (!player.alive) return;
+    if (player.invuln > 0) player.invuln--;
+
+    // Squirt attack
+    if (pressed('F')) {
+      tryStartSquirt();
+    } else {
+      if (player.squirting) {
+        // Releasing lets the target deflate - and a boss forget his swing
+        releaseSquirt(player);
+      }
+    }
+
+    if (player.squirting) {
+      player.squirtTimer++;
+      const tgt = player.squirtTarget;
+      if (tgt && tgt.alive && (isBoss(tgt) || tileAt(tgt.x+8, tgt.y+8) === EMPTY)) {
+        // Inflate over time - the bow does it in one go, but a boss is far
+        // too big for that and has to be pumped up the slow way.
+        const fast = equipped === 'bow' && !isBoss(tgt);
+        if (player.squirtTimer % (fast ? 1 : 18) === 0) {
+          tgt.pumped += fast ? 4 : 1;
+          tgt.pumpDecay = 60;
+          const popAt = equipped === 'party' ? 3 : 4;   // party hat pops them early
+          if (tgt.pumped >= popAt && inflateHit(tgt, false)) {
+            player.squirting = false;
+            player.squirtTarget = null;
+            player.squirtTimer = 0;
+            return;
+          }
+        }
+        // Bosses hit back while you inflate them, so you cannot just stand
+        // there and pump. Let go when he rears up, then grab him again.
+        if (isBoss(tgt)) {
+          tgt.lash++;
+          if (tgt.lash >= lashLimit(tgt)) {
+            releaseSquirt(player);
+            tgt.lash = 0;
+            if (player.invuln <= 0) {
+              hitPlayer(tgt.type);
+              return;
+            }
+          }
+        }
+        // Rocks still squish while squirting
+        for (const r of rocks) {
+          if (r.landed || player.invuln > 0) continue;
+          if (Math.abs(r.x - player.x) < 12 && Math.abs(r.y - player.y) < 12) {
+            hitPlayer('squish');
+            return;
+          }
+        }
+        // Cannot move while squirting
+        return;
+      } else {
+        releaseSquirt(player);
+      }
+    }
+
+    // Movement (axis-locked, snap to perpendicular axis when turning)
+    let dx = 0, dy = 0;
+    if (pressed('L')) { dx = -1; player.dir = 'L'; }
+    else if (pressed('R')) { dx = 1; player.dir = 'R'; }
+    else if (pressed('U')) { dy = -1; player.dir = 'U'; }
+    else if (pressed('D')) { dy = 1; player.dir = 'D'; }
+
+    if (dx !== 0 || dy !== 0) {
+      // Snap to grid on perpendicular axis
+      if (dx !== 0) player.y = Math.round(player.y / TILE) * TILE;
+      if (dy !== 0) player.x = Math.round(player.x / TILE) * TILE;
+
+      const nx = player.x + dx * player.speed;
+      const ny = player.y + dy * player.speed;
+      if (canOccupy(nx, ny)) {
+        player.x = nx;
+        player.y = ny;
+        carveAt(player.x, player.y);
+        // Trail
+        const head = { x: player.x + 8, y: player.y + 8 };
+        const last = player.bodyTrail[0];
+        if (!last || Math.hypot(head.x - last.x, head.y - last.y) > 3) {
+          player.bodyTrail.unshift(head);
+          if (player.bodyTrail.length > 6) player.bodyTrail.pop();
+        }
+      }
+    }
+
+    // Collide with rocks (falling) or PDs
+    for (const p of pds) {
+      if (!p.alive) continue;
+      const reach = isBoss(p) ? 20 : 12;
+      if (Math.abs(entCX(p) - (player.x + 8)) < reach &&
+          Math.abs(entCY(p) - (player.y + 8)) < reach) {
+        if (player.invuln <= 0 && p.pumped < 3) {
+          hitPlayer(p.type === 'squiggle' ? 'tangle'
+                  : p.type === 'ant' ? 'ant'
+                  : p.type === 'queen' ? 'queen'
+                  : p.type === 'king' ? 'king'
+                  : p.type === 'jester' ? 'jester' : 'chomp');
+          return;
+        }
+      }
+    }
+    for (const r of rocks) {
+      if (r.landed || player.invuln > 0) continue;
+      if (Math.abs(r.x - player.x) < 12 && Math.abs(r.y - player.y) < 12) {
+        hitPlayer('squish');
+        return;
+      }
+    }
+  }
+
+  function tryStartSquirt() {
+    if (!player.alive) return;
+    const target = findSquirtTarget(player);
+    if (target) {
+      player.squirting = true;
+      player.squirtTarget = target;
+    }
+  }
+
+  // Let go of whatever is on the end of the ink. A boss resets his wind-up.
+  function releaseSquirt(ent) {
+    if (ent.squirtTarget && isBoss(ent.squirtTarget)) ent.squirtTarget.lash = 0;
+    ent.squirting = false;
+    ent.squirtTimer = 0;
+    ent.squirtTarget = null;
+  }
+
+  // Nearest live enemy lined up in front of `ent`, within about two tiles.
+  function findSquirtTarget(ent) {
+    let dx = 0, dy = 0;
+    if (ent.dir === 'L') dx = -1;
+    else if (ent.dir === 'R') dx = 1;
+    else if (ent.dir === 'U') dy = -1;
+    else dy = 1;
+
+    const cx = ent.x + 8;
+    const cy = ent.y + 8;
+    let target = null;
+    let bestDist = 1e9;
+    for (const p of pds) {
+      if (!p.alive) continue;
+      const half = entHalf(p);
+      const px = entCX(p);
+      const py = entCY(p);
+      // The cowboy hat lets the ink carry a good tile and a half further
+      const span = equipped === 'cowboy' ? 3.7 : 2.2;
+      const reach = TILE * span + (half - 8);  // measure to her edge, not her middle
+      // Must be aligned on the axis of travel
+      if (dx !== 0 && Math.abs(py - cy) < half && Math.sign(px - cx) === dx) {
+        const d = Math.abs(px - cx);
+        if (d < reach && d < bestDist) { bestDist = d; target = p; }
+      } else if (dy !== 0 && Math.abs(px - cx) < half && Math.sign(py - cy) === dy) {
+        const d = Math.abs(py - cy);
+        if (d < reach && d < bestDist) { bestDist = d; target = p; }
+      }
+    }
+    return target;
+  }
+
+  // ====== Helper worm (magic hat) ======
+  // A conjured second worm that hunts enemies on its own. It is slower than
+  // you, slower to pop things, and it has three lives of its own - run them
+  // out and it is gone for the rest of the burrow. Its pops score points but
+  // pay no coins.
+  const HELPER_LIVES = 3;
+  let helper = null;
+
+  function makeHelper() {
+    return {
+      x: TILE, y: 0,
+      dir: 'R',
+      speed: 0.8,
+      lives: HELPER_LIVES,
+      invuln: 0,
+      squirting: false,
+      squirtTimer: 0,
+      squirtTarget: null,
+      bodyTrail: [],
+      repathTimer: 0,
+    };
+  }
+
+  // One knock costs it a life and sends it back to the mouth of the burrow.
+  function hurtHelper() {
+    helper.lives--;
+    if (helper.lives <= 0) {
+      helper = null;
+      helperGoneMsg = 110;
+      return;
+    }
+    helper.x = TILE;
+    helper.y = 0;
+    helper.dir = 'R';
+    helper.invuln = 90;
+    helper.squirting = false;
+    helper.squirtTarget = null;
+    helper.squirtTimer = 0;
+    helper.bodyTrail.length = 0;
+    carveAt(helper.x, helper.y);
+  }
+
+  function helperCanGo(dir) {
+    const ax = Math.round(helper.x / TILE) * TILE;
+    const ay = Math.round(helper.y / TILE) * TILE;
+    const dx = dir === 'L' ? -1 : dir === 'R' ? 1 : 0;
+    const dy = dir === 'U' ? -1 : dir === 'D' ? 1 : 0;
+    return canOccupy(ax + dx * TILE, ay + dy * TILE);
+  }
+
+  function updateHelper() {
+    if (!helper) return;
+
+    // It can be caught now, same as you can
+    if (helper.invuln > 0) {
+      helper.invuln--;
+    } else {
+      for (const p of pds) {
+        if (!p.alive || p.pumped >= 3) continue;
+        const reach = isBoss(p) ? 20 : 12;
+        if (Math.abs(entCX(p) - (helper.x + 8)) < reach &&
+            Math.abs(entCY(p) - (helper.y + 8)) < reach) { hurtHelper(); return; }
+      }
+      for (const r of rocks) {
+        if (r.landed) continue;
+        if (Math.abs(r.x - helper.x) < 12 && Math.abs(r.y - helper.y) < 12) {
+          hurtHelper();
+          return;
+        }
+      }
+    }
+
+    // Keep pumping whatever it locked onto
+    if (helper.squirting) {
+      const tgt = helper.squirtTarget;
+      if (tgt && tgt.alive && (isBoss(tgt) || tileAt(tgt.x + 8, tgt.y + 8) === EMPTY)) {
+        helper.squirtTimer++;
+        if (helper.squirtTimer % 30 === 0) {    // slower on the pump than you
+          tgt.pumped++;
+          tgt.pumpDecay = 60;
+          if (tgt.pumped >= 4 && inflateHit(tgt, true)) {
+            helper.squirting = false;
+            helper.squirtTarget = null;
+            helper.squirtTimer = 0;
+          }
+        }
+        return;
+      }
+      helper.squirting = false;
+      helper.squirtTarget = null;
+      helper.squirtTimer = 0;
+    }
+
+    const lined = findSquirtTarget(helper);
+    if (lined) {
+      helper.squirting = true;
+      helper.squirtTarget = lined;
+      helper.squirtTimer = 0;
+      return;
+    }
+
+    // Chase the nearest live enemy, closing the bigger gap first
+    let goal = null, bestDist = 1e9;
+    for (const p of pds) {
+      if (!p.alive) continue;
+      const d = Math.hypot(p.x - helper.x, p.y - helper.y);
+      if (d < bestDist) { bestDist = d; goal = p; }
+    }
+    if (!goal) return;
+
+    helper.repathTimer--;
+    const ax = Math.round(helper.x / TILE) * TILE;
+    const ay = Math.round(helper.y / TILE) * TILE;
+    const aligned = Math.abs(helper.x - ax) < 0.6 && Math.abs(helper.y - ay) < 0.6;
+    if (aligned && helper.repathTimer <= 0) {
+      helper.repathTimer = 12;
+      const dxp = goal.x - helper.x;
+      const dyp = goal.y - helper.y;
+      const order = Math.abs(dxp) > Math.abs(dyp)
+        ? [dxp > 0 ? 'R' : 'L', dyp > 0 ? 'D' : 'U']
+        : [dyp > 0 ? 'D' : 'U', dxp > 0 ? 'R' : 'L'];
+      const open = ['L','R','U','D'].filter(helperCanGo);
+      const pick = order.find(d => open.includes(d));
+      if (pick) helper.dir = pick;
+      else if (open.length) helper.dir = open[(Math.random() * open.length) | 0];
+    }
+
+    let dx = 0, dy = 0;
+    if (helper.dir === 'L') dx = -1;
+    else if (helper.dir === 'R') dx = 1;
+    else if (helper.dir === 'U') dy = -1;
+    else dy = 1;
+    if (dx !== 0) helper.y = ay;
+    if (dy !== 0) helper.x = ax;
+
+    const digging = tileAt(helper.x + 8, helper.y + 8) === DIRT;
+    const s = digging ? helper.speed * 0.6 : helper.speed;
+    const nx = helper.x + dx * s;
+    const ny = helper.y + dy * s;
+    if (canOccupy(nx, ny)) {
+      helper.x = nx;
+      helper.y = ny;
+      carveAt(helper.x, helper.y);
+      const head = { x: helper.x + 8, y: helper.y + 8 };
+      const last = helper.bodyTrail[0];
+      if (!last || Math.hypot(head.x - last.x, head.y - last.y) > 3) {
+        helper.bodyTrail.unshift(head);
+        if (helper.bodyTrail.length > 6) helper.bodyTrail.pop();
+      }
+    } else {
+      helper.x = ax;       // back onto the grid, or it jams against the rock
+      helper.y = ay;
+      helper.repathTimer = 0;
+    }
+  }
+
+  function updatePDs() {
+    for (const p of pds) {
+      if (!p.alive) continue;
+      if (p.hurtFlash > 0) p.hurtFlash--;
+      // Decay pump pressure
+      if (p.pumped > 0) {
+        if (p.pumpDecay > 0) p.pumpDecay--;
+        else { p.pumped--; p.pumpDecay = 60; }
+      }
+      // While being pumped, stay put
+      if (p === player.squirtTarget && player.squirting) continue;
+      // Stunned by pumping for a moment after release
+      if (p.pumped >= 2) { p.stunned = Math.max(p.stunned, 30); }
+      if (p.stunned > 0) { p.stunned--; continue; }
+      if (p.type === 'queen') { moveQueen(p); continue; }
+      if (p.type === 'king') { moveKing(p); continue; }
+      if (p.type === 'jester') { moveJester(p); continue; }
+
+      // Decide direction
+      p.thinkTimer--;
+      const ax = Math.round(p.x / TILE) * TILE;
+      const ay = Math.round(p.y / TILE) * TILE;
+      const aligned = Math.abs(p.x - ax) < 0.5 && Math.abs(p.y - ay) < 0.5;
+
+      if (aligned && p.thinkTimer <= 0) {
+        p.thinkTimer = 20 + ((Math.random()*30)|0);
+        const tunnelChoices = [];
+        const dirtChoices = [];
+        const dirs = [['L',-1,0],['R',1,0],['U',0,-1],['D',0,1]];
+        for (const [d, dx, dy] of dirs) {
+          const nx = p.x + dx * TILE;
+          const ny = p.y + dy * TILE;
+          if (nx < 0 || ny < 0 || nx + TILE > COLS*TILE || ny + TILE > PLAY_H) continue;
+          const t = tileAt(nx+8, ny+8);
+          if (t === ROCK || t === FALLING) continue;
+          if (t === EMPTY) tunnelChoices.push(d);
+          else if (t === DIRT) dirtChoices.push(d);
+        }
+        // Prefer existing tunnels; fall back to digging through dirt
+        const choices = tunnelChoices.length ? tunnelChoices : dirtChoices;
+        if (choices.length) {
+          // Bias toward player
+          const dxp = (player.x - p.x);
+          const dyp = (player.y - p.y);
+          let pref;
+          if (Math.abs(dxp) > Math.abs(dyp)) pref = dxp > 0 ? 'R' : 'L';
+          else pref = dyp > 0 ? 'D' : 'U';
+          const hunts = equipped !== 'shades';   // too cool to be noticed
+          if (hunts && choices.includes(pref) && Math.random() < 0.7) p.dir = pref;
+          else p.dir = choices[(Math.random()*choices.length)|0];
+        }
+      }
+
+      // Move (slower while digging through dirt)
+      const tHere = tileAt(p.x + 8, p.y + 8);
+      const digging = tHere === DIRT;
+      const s = digging ? p.speed * 0.5 : p.speed;
+      let dx = 0, dy = 0;
+      if (p.dir === 'L') dx = -1;
+      else if (p.dir === 'R') dx = 1;
+      else if (p.dir === 'U') dy = -1;
+      else if (p.dir === 'D') dy = 1;
+      const nx = p.x + dx * s;
+      const ny = p.y + dy * s;
+      if (nx >= 0 && ny >= 0 && nx + TILE <= COLS*TILE && ny + TILE <= PLAY_H) {
+        const t = tileAt(nx+8, ny+8);
+        if (t === EMPTY || t === DIRT) {
+          p.x = nx;
+          p.y = ny;
+          if (t === DIRT) carveAt(p.x, p.y);
+          if (p.type === 'squiggle') p.wiggle += 0.4;
+        } else {
+          // Bumped something solid. Snap back onto the grid before re-thinking,
+          // or `aligned` never comes true again and it pushes at the rock forever.
+          p.x = ax;
+          p.y = ay;
+          p.thinkTimer = 0;
+        }
+      } else {
+        p.thinkTimer = 0;
+      }
+    }
+  }
+
+  function updateRocks() {
+    // Detect dirt-supported rocks vs falling
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        if (grid[r][c] === ROCK) {
+          // If tile below is empty, start wobble then fall
+          const below = r + 1 < ROWS ? grid[r+1][c] : DIRT;
+          if (below === EMPTY) {
+            // Convert into falling rock object
+            grid[r][c] = EMPTY;
+            rocks.push({
+              x: c * TILE,
+              y: r * TILE,
+              vy: 0,
+              wobble: 30,
+              landed: false,
+            });
+          }
+        }
+      }
+    }
+    for (const rk of rocks) {
+      if (rk.landed) continue;
+      if (rk.wobble > 0) { rk.wobble--; continue; }
+      rk.vy += 0.25;
+      rk.y += rk.vy;
+      // Hit a wall (dirt) below or ground?
+      const cx = rk.x + 8;
+      const by = rk.y + TILE;
+      if (by >= PLAY_H) {
+        rk.y = PLAY_H - TILE;
+        rk.landed = true;
+        continue;
+      }
+      const t = tileAt(cx, by);
+      if (t === DIRT || t === ROCK) {
+        // Snap to grid above
+        rk.y = (Math.floor((by) / TILE) - 1) * TILE;
+        rk.landed = true;
+        // Re-embed as a static rock so the dirt system can re-check next time it's exposed
+        const r2 = Math.floor((rk.y) / TILE);
+        const c2 = Math.floor((rk.x) / TILE);
+        setTile(r2, c2, ROCK);
+      }
+      // Kill enemies in the path
+      for (const p of pds) {
+        if (!p.alive) continue;
+        const reach = isBoss(p) ? 22 : 12;
+        if (Math.abs(entCX(p) - (rk.x + 8)) >= reach ||
+            Math.abs(entCY(p) - (rk.y + 8)) >= reach) continue;
+        if (isBoss(p)) {
+          // Too big to squash. Ink is the only thing that works on them.
+          if (bossGuardMsg <= 0) bossGuardMsg = 110;
+        } else {
+          p.alive = false;
+          awardKill(p, 'rock', false);
+        }
+      }
+    }
+    // Remove rocks that became static
+    rocks = rocks.filter(rk => !rk.landed || true); // keep around briefly for draw
+    // Simpler: drop landed
+    rocks = rocks.filter(rk => !rk.landed);
+  }
+
+  // ====== Drawing ======
+  function px(x, y, color) {
+    ctx.fillStyle = color;
+    ctx.fillRect(x|0, y|0, 1, 1);
+  }
+  function rect(x, y, w, h, color) {
+    ctx.fillStyle = color;
+    ctx.fillRect(x|0, y|0, w|0, h|0);
+  }
+
+  function drawDirtTile(c, r) {
+    const x = c * TILE;
+    const y = r * TILE + HUD_H;
+    rect(x, y, TILE, TILE, C.dirt2);
+    // crosshatch
+    ctx.fillStyle = C.dirt1;
+    const seed = dirtSeed[r][c];
+    for (let i = 0; i < 6; i++) {
+      const px1 = x + ((i * 5 + seed * 3) % TILE);
+      const py1 = y + ((i * 7 + seed * 5) % TILE);
+      ctx.fillRect(px1, py1, 2, 1);
+    }
+    ctx.fillStyle = C.dirt3;
+    for (let i = 0; i < 4; i++) {
+      const px1 = x + ((i * 3 + seed * 4 + 5) % TILE);
+      const py1 = y + ((i * 11 + seed * 2 + 3) % TILE);
+      ctx.fillRect(px1, py1, 1, 1);
+    }
+  }
+
+  function drawTunnelTile(c, r) {
+    const x = c * TILE;
+    const y = r * TILE + HUD_H;
+    rect(x, y, TILE, TILE, C.tunnel);
+    // Slight texture
+    ctx.fillStyle = '#3a1c0a';
+    ctx.fillRect(x+2, y+3, 1, 1);
+    ctx.fillRect(x+10, y+9, 1, 1);
+    ctx.fillRect(x+6, y+13, 1, 1);
+  }
+
+  function drawRockTile(c, r) {
+    const x = c * TILE;
+    const y = r * TILE + HUD_H;
+    drawRockAt(x, y);
+  }
+
+  function drawRockAt(x, y) {
+    rect(x+2, y+2, 12, 12, C.rock2);
+    rect(x+3, y+3, 10, 10, C.rock1);
+    // shading
+    rect(x+10, y+3, 3, 10, C.rock2);
+    rect(x+3, y+11, 10, 2, C.rock2);
+    // outline
+    rect(x+2, y+1, 12, 1, C.rockD);
+    rect(x+1, y+2, 1, 12, C.rockD);
+    rect(x+14, y+2, 1, 12, C.rockD);
+    rect(x+2, y+14, 12, 1, C.rockD);
+  }
+
+  // Worm sprite at (x, y) facing dir. c1 = bright, c2 = shadow.
+  function drawWorm(x, y, dir, trail, c1, c2) {
+    // Body trail (segments behind the head)
+    ctx.fillStyle = c2;
+    for (let i = 0; i < trail.length; i++) {
+      const seg = trail[i];
+      const tx = seg.x - 3;
+      const ty = seg.y - 3 + HUD_H;
+      ctx.fillRect(tx, ty, 6, 6);
+      ctx.fillStyle = c1;
+      ctx.fillRect(tx+1, ty+1, 4, 4);
+      ctx.fillStyle = c2;
+    }
+
+    // Head sprite (16x16)
+    const sx = x|0, sy = (y + HUD_H)|0;
+    // base body oval
+    rect(sx+3, sy+5, 10, 7, c2);
+    rect(sx+4, sy+4, 8, 9, c2);
+    rect(sx+5, sy+5, 6, 7, c1);
+    rect(sx+4, sy+6, 8, 5, c1);
+    // Head bump in direction of travel
+    if (dir === 'R') {
+      rect(sx+12, sy+6, 3, 5, c2);
+      rect(sx+13, sy+7, 2, 3, c1);
+      px(sx+12, sy+7, C.wormE); // eye
+    } else if (dir === 'L') {
+      rect(sx+1, sy+6, 3, 5, c2);
+      rect(sx+1, sy+7, 2, 3, c1);
+      px(sx+3, sy+7, C.wormE);
+    } else if (dir === 'U') {
+      rect(sx+6, sy+1, 5, 3, c2);
+      rect(sx+7, sy+1, 3, 2, c1);
+      px(sx+7, sy+3, C.wormE);
+    } else {
+      rect(sx+6, sy+12, 5, 3, c2);
+      rect(sx+7, sy+13, 3, 2, c1);
+      px(sx+8, sy+12, C.wormE);
+    }
+    // Segment lines
+    ctx.fillStyle = c2;
+    ctx.fillRect(sx+5, sy+8, 6, 1);
+    ctx.fillRect(sx+7, sy+5, 1, 6);
+  }
+
+  // ====== Hats ======
+  // 8x7-ish hat with its top-left at (hx, hy). Also used for the shop rows.
+  function drawHat(hx, hy, id) {
+    if (id === 'armor') {
+      rect(hx+3, hy-1, 2, 2, C.red);        // plume
+      rect(hx, hy+2, 8, 4, C.steelD);
+      rect(hx+1, hy+1, 6, 4, C.steel);
+      rect(hx+1, hy+4, 6, 1, C.steelD);     // visor slit
+    } else if (id === 'magic') {
+      rect(hx+2, hy-1, 4, 5, C.magic1);     // top hat crown
+      rect(hx+5, hy-1, 1, 5, C.magic2);     // shaded side
+      rect(hx+2, hy+2, 4, 1, C.yellow);     // hat band
+      rect(hx, hy+4, 8, 1, C.magic1);       // brim
+      rect(hx, hy+5, 8, 1, C.magic2);
+    } else if (id === 'slugcrown') {
+      rect(hx+1, hy+3, 6, 3, C.slug2);      // band
+      rect(hx+1, hy+3, 6, 1, C.slug1);
+      rect(hx+1, hy+1, 1, 2, C.slug1);      // three points
+      rect(hx+3, hy,   2, 3, C.slug1);
+      rect(hx+6, hy+1, 1, 2, C.slug1);
+      px(hx+3, hy+4, C.yellow);             // jewel
+    } else if (id === 'bow') {
+      rect(hx,   hy+1, 3, 5, C.red);
+      rect(hx+5, hy+1, 3, 5, C.red);
+      rect(hx,   hy+2, 3, 3, C.bowL);
+      rect(hx+5, hy+2, 3, 3, C.bowL);
+      rect(hx+3, hy+1, 2, 5, C.bowD);
+    } else if (id === 'jester') {
+      rect(hx+1, hy+3, 6, 3, C.jest1);
+      rect(hx+4, hy+3, 3, 3, C.jest2);
+      rect(hx,   hy+1, 2, 3, C.jest1);
+      rect(hx+6, hy+1, 2, 3, C.jest2);
+      px(hx,   hy, C.yellow);
+      px(hx+7, hy, C.yellow);
+      px(hx+3, hy+1, C.yellow);
+    } else if (id === 'shades') {
+      rect(hx,   hy+1, 8, 1, C.sqEye);
+      rect(hx,   hy+2, 8, 3, C.sqEye);
+      rect(hx+1, hy+2, 2, 2, C.lens);
+      rect(hx+5, hy+2, 2, 2, C.lens);
+      px(hx+1, hy+2, C.wing);
+      px(hx+5, hy+2, C.wing);
+    } else if (id === 'mushroom') {
+      rect(hx+1, hy+4, 6, 2, C.pdBel);      // pale stalk
+      rect(hx, hy+2, 8, 2, C.red);          // the cap
+      rect(hx+1, hy+1, 6, 1, C.red);
+      rect(hx+3, hy, 2, 1, C.red);
+      px(hx+2, hy+2, C.text);               // spots
+      px(hx+5, hy+1, C.text);
+      px(hx+4, hy+3, C.text);
+    } else if (id === 'cowboy') {
+      rect(hx+2, hy, 4, 4, C.pd2);          // crown
+      rect(hx+3, hy, 2, 4, C.pd1);
+      rect(hx+2, hy+2, 4, 1, C.mole2);      // band
+      rect(hx, hy+4, 8, 2, C.pd2);          // the big brim
+      rect(hx, hy+4, 8, 1, C.pd1);
+    } else if (id === 'party') {
+      px(hx+4, hy-2, C.coin1);              // pompom
+      rect(hx+3, hy-1, 2, 2, C.magic1);     // cone, striped
+      rect(hx+2, hy+1, 4, 2, C.red);
+      rect(hx+1, hy+3, 6, 2, C.magic1);
+      rect(hx+1, hy+5, 6, 1, C.coin1);
+    } else if (id === 'space') {
+      rect(hx+1, hy+1, 6, 4, C.wing);       // the dome
+      rect(hx+2, hy, 4, 6, C.wing);
+      rect(hx+2, hy+2, 4, 3, C.lens);       // tinted glass
+      px(hx+2, hy+1, C.text);               // glint
+      rect(hx, hy+5, 8, 1, C.steelD);       // collar
+    } else if (id === 'propeller') {
+      rect(hx+1, hy+3, 6, 3, C.prop1);      // beanie
+      rect(hx+2, hy+2, 4, 1, C.prop2);
+      rect(hx+3, hy+1, 2, 1, C.prop2);      // stalk
+      if ((Math.floor(performance.now() / 70) % 2) === 0) {
+        rect(hx, hy, 8, 1, C.prop2);        // blades edge-on
+      } else {
+        rect(hx+3, hy-1, 2, 1, C.prop2);
+        rect(hx+3, hy+1, 2, 1, C.prop2);
+      }
+    }
+  }
+
+  // Perch a hat on a 16x16 worm sprite whose top-left is (sx, sy) in screen px.
+  function drawHatOn(sx, sy, dir, id) {
+    if (!id || id === 'none') return;
+    const nudge = dir === 'R' ? 2 : dir === 'L' ? -2 : 0;
+    drawHat((sx + 4 + nudge)|0, (sy + 1)|0, id);
+  }
+
+  function drawCoin(x, y) {
+    rect(x+1, y,   4, 6, C.coin2);
+    rect(x,   y+1, 6, 4, C.coin2);
+    rect(x+1, y+1, 4, 4, C.coin1);
+    rect(x+2, y+2, 1, 2, C.coin2);
+  }
+
+  // Slugbuck: green, with a little squiggle stamped on it
+  function drawSlugBuck(x, y) {
+    rect(x+1, y,   4, 6, C.slug2);
+    rect(x,   y+1, 6, 4, C.slug2);
+    rect(x+1, y+1, 4, 4, C.slug1);
+    px(x+1, y+2, C.slug2);
+    px(x+2, y+3, C.slug2);
+    px(x+3, y+2, C.slug2);
+    px(x+4, y+3, C.slug2);
+  }
+
+  // Draw an icon + amount, returns the width used
+  function drawPurse(x, y, icon, amount, color) {
+    const txt = String(amount);
+    if (icon === 'slug') drawSlugBuck(x, y - 1);
+    else drawCoin(x, y - 1);
+    drawText(txt, x + 8, y, color, 1);
+    return 8 + txt.length * 4;
+  }
+
+  // Fat coin used as the title-screen button
+  function drawCoinButton() {
+    const x = coinBtnBounds.x + 4, y = coinBtnBounds.y + 4;   // 16x16
+    rect(x+4, y,   8, 16, C.coin2);
+    rect(x,   y+4, 16, 8, C.coin2);
+    rect(x+2, y+2, 12, 12, C.coin2);
+    rect(x+5, y+1, 6, 14, C.coin1);
+    rect(x+1, y+5, 14, 6, C.coin1);
+    rect(x+3, y+3, 10, 10, C.coin1);
+    drawText('C', x+6, y+6, C.coin2, 1);
+  }
+
+  // Chunky pressable slab, also used for the entry boxes
+  function drawSlab(x, y, w, h) {
+    rect(x, y, w, h, '#3a1c0a');
+    rect(x, y, w, 1, C.dirt1);
+    rect(x, y, 1, h, C.dirt1);
+    rect(x + w - 1, y, 1, h, '#000');
+    rect(x, y + h - 1, w, 1, '#000');
+  }
+
+  // 3x4 keypad. Returns the y just past the last row.
+  function drawKeypad(baseY) {
+    keypadBounds.length = 0;
+    const bw = 32, bh = 20, gap = 6;
+    const x0 = Math.floor((VW - (3 * bw + 2 * gap)) / 2);
+    for (let r = 0; r < KEYPAD_KEYS.length; r++) {
+      for (let c = 0; c < 3; c++) {
+        const key = KEYPAD_KEYS[r][c];
+        const x = x0 + c * (bw + gap);
+        const y = baseY + r * (bh + gap);
+        drawSlab(x, y, bw, bh);
+        const color = key === 'OK' ? C.sq1 : key === 'DEL' ? C.red : C.yellow;
+        drawText(key, x + Math.floor((bw - key.length * 4) / 2), y + 7, color, 1);
+        keypadBounds.push({ x, y, w: bw, h: bh, key });
+      }
+    }
+    return baseY + KEYPAD_KEYS.length * (bh + gap);
+  }
+
+  function drawBackButton(y) {
+    const w = 16;
+    const x = Math.floor((VW - w) / 2);
+    drawText('BACK', x, y, C.text, 1);
+    backBtnBounds.x = x - 12;
+    backBtnBounds.y = y - 5;
+    backBtnBounds.w = w + 24;
+    backBtnBounds.h = 15;
+  }
+
+  function drawCodeScreen() {
+    ctx.fillStyle = 'rgba(0,0,0,0.9)';
+    ctx.fillRect(0, HUD_H, VW, PLAY_H);
+    drawCenter('ENTER CODE', 26, C.yellow, 2);
+
+    // Four digit slots
+    const sw = 14, sgap = 6;
+    const x0 = Math.floor((VW - (4 * sw + 3 * sgap)) / 2);
+    for (let i = 0; i < 4; i++) {
+      const x = x0 + i * (sw + sgap);
+      drawSlab(x, 46, sw, 18);
+      if (codeEntry[i]) drawText(codeEntry[i], x + 4, 51, C.coin1, 2);
+      else drawText('-', x + 4, 51, '#6b2a08', 2);
+    }
+
+    const endY = drawKeypad(74);
+    if (codeMsgTimer > 0) drawCenter(codeMsg, endY + 1, codeMsgColor, 1);
+    drawBackButton(endY + 15);
+  }
+
+  function drawCheatScreen() {
+    ctx.fillStyle = 'rgba(0,0,0,0.9)';
+    ctx.fillRect(0, HUD_H, VW, PLAY_H);
+    drawCenter('COIN MACHINE', 22, C.coin1, 2);
+
+    // Pick which currency the payout lands in
+    curBtnBounds.length = 0;
+    const btnW = 56, btnH = 13, btnGap = 6;
+    let bx = Math.floor((VW - (btnW * 2 + btnGap)) / 2);
+    for (const opt of [{ cur: 'coin', label: 'COINS' }, { cur: 'slug', label: 'BUCKS' }]) {
+      const on = grantCurrency === opt.cur;
+      drawSlab(bx, 38, btnW, btnH);
+      if (on) rect(bx + 1, 39, btnW - 2, btnH - 2, '#5c3a16');
+      const col = on ? (opt.cur === 'slug' ? C.slug1 : C.coin1) : '#8b6a40';
+      drawText(opt.label, bx + Math.floor((btnW - opt.label.length * 4) / 2), 42, col, 1);
+      curBtnBounds.push({ x: bx, y: 38, w: btnW, h: btnH, cur: opt.cur });
+      bx += btnW + btnGap;
+    }
+
+    const shown = coinEntry || '0';
+    const tw = shown.length * 8;
+    const bw = Math.max(tw + 12, 56);
+    drawSlab(Math.floor((VW - bw) / 2), 56, bw, 18);
+    drawText(shown, Math.floor((VW - tw) / 2), 61, grantCurrency === 'slug' ? C.slug1 : C.coin1, 2);
+
+    const endY = drawKeypad(80);
+    if (codeMsgTimer > 0) drawCenter(codeMsg, endY + 1, codeMsgColor, 1);
+    drawBackButton(endY + 15);
+  }
+
+  // The Jester Ant: 32x32 of motley, and he blinks in and out of view.
+  function drawJester(p) {
+    const sx = p.x|0, sy = (p.y + HUD_H)|0;
+    const flash = p.hurtFlash > 0 && (p.hurtFlash % 8) < 4;
+    const red  = flash ? C.text : C.jest1;
+    const pur  = flash ? C.text : C.jest2;
+    const dark = flash ? C.rock2 : C.antD;
+    const puff = Math.min(3, p.pumped) * 2;
+
+    const prev = ctx.globalAlpha;
+    if (p.mode === 'vanish') ctx.globalAlpha = Math.max(0.15, p.phase / 30);
+    else if (p.mode === 'appear') ctx.globalAlpha = Math.min(1, 1 - p.phase / 20);
+
+    // six legs
+    rect(sx+4,  sy+20, 7, 1, dark);  rect(sx+4,  sy+20, 1, 4, dark);
+    rect(sx+3,  sy+25, 8, 1, dark);  rect(sx+3,  sy+25, 1, 4, dark);
+    rect(sx+21, sy+20, 7, 1, dark);  rect(sx+27, sy+20, 1, 4, dark);
+    rect(sx+21, sy+25, 8, 1, dark);  rect(sx+28, sy+25, 1, 4, dark);
+
+    // abdomen, split down the middle like motley
+    rect(sx+9-puff,  sy+22-puff, 14+puff*2, 10+puff, dark);
+    rect(sx+10-puff, sy+23-puff,  6+puff,    8+puff, red);
+    rect(sx+16,      sy+23-puff,  6+puff,    8+puff, pur);
+
+    // thorax
+    rect(sx+12, sy+17, 8, 6, dark);
+    rect(sx+13, sy+18, 3, 4, pur);
+    rect(sx+16, sy+18, 3, 4, red);
+
+    // ruff
+    rect(sx+9, sy+15, 14, 2, C.yellow);
+
+    // head
+    rect(sx+11, sy+8, 10, 8, dark);
+    rect(sx+12, sy+9,  8, 6, C.jestS);
+    px(sx+14, sy+11, C.sqEye);
+    px(sx+18, sy+11, C.sqEye);
+    rect(sx+14, sy+13, 5, 1, C.sqEye);     // grin
+
+    // motley cap with three belled points
+    rect(sx+9,  sy+5, 7, 4, red);
+    rect(sx+16, sy+5, 7, 4, pur);
+    rect(sx+6,  sy+2, 4, 4, red);
+    rect(sx+14, sy+1, 4, 4, C.yellow);
+    rect(sx+22, sy+2, 4, 4, pur);
+    px(sx+5,  sy+1, C.yellow);
+    px(sx+15, sy,   C.jest1);
+    px(sx+26, sy+1, C.yellow);
+
+    ctx.globalAlpha = prev;
+    drawBossHealth(sx, sy, p);
+  }
+
+  function drawJesterFace(x, y) {
+    rect(x+3,  y+7, 14, 12, C.antD);
+    rect(x+4,  y+8, 12, 10, C.jestS);
+    px(x+7,  y+11, C.sqEye);
+    px(x+12, y+11, C.sqEye);
+    rect(x+7,  y+14, 6, 1, C.sqEye);
+    rect(x+2,  y+4, 8, 4, C.jest1);
+    rect(x+10, y+4, 8, 4, C.jest2);
+    rect(x+1,  y+1, 4, 4, C.jest1);
+    rect(x+15, y+1, 4, 4, C.jest2);
+    rect(x+8,  y,   4, 4, C.yellow);
+  }
+
+  // The King Hornet: 32x32, yellow and black, shades, beating wings.
+  function drawKing(p) {
+    const sx = p.x|0, sy = (p.y + HUD_H)|0;
+    const flash = p.hurtFlash > 0 && (p.hurtFlash % 8) < 4;
+    const body = flash ? C.text : C.horn1;
+    const dark = flash ? C.rock2 : C.horn2;
+    const puff = Math.min(3, p.pumped) * 2;
+    const flap = (Math.floor(p.wiggle) % 2) === 0;
+
+    // wings, behind everything
+    const wy = sy + (flap ? 5 : 8);
+    rect(sx,    wy,   9, 9, C.wing);
+    rect(sx+23, wy,   9, 9, C.wing);
+    rect(sx+1,  wy+1, 7, 7, '#e8f4ff');
+    rect(sx+24, wy+1, 7, 7, '#e8f4ff');
+
+    // striped abdomen
+    rect(sx+9-puff,  sy+17-puff, 14+puff*2, 12+puff, dark);
+    rect(sx+10-puff, sy+18-puff, 12+puff*2, 10+puff, body);
+    rect(sx+10, sy+20, 12, 2, dark);
+    rect(sx+10, sy+24, 12, 2, dark);
+    rect(sx+15, sy+29, 2, 3, dark);          // stinger
+
+    // thorax
+    rect(sx+10, sy+12, 12, 6, dark);
+    rect(sx+11, sy+13, 10, 2, '#3a3020');
+
+    // head
+    rect(sx+10, sy+3, 12, 10, body);
+    rect(sx+10, sy+3, 12, 1, dark);
+    rect(sx+14, sy+11, 4, 1, dark);          // mandibles
+    rect(sx+11, sy+1, 1, 2, dark);           // antennae
+    rect(sx+20, sy+1, 1, 2, dark);
+
+    // a small crown, because he is the king
+    rect(sx+13, sy+1, 7, 2, C.coin1);
+    px(sx+13, sy, C.coin1);
+    px(sx+16, sy, C.coin1);
+    px(sx+19, sy, C.coin1);
+
+    // the sunglasses
+    rect(sx+9,  sy+6, 14, 4, C.sqEye);
+    rect(sx+10, sy+7, 4, 2, C.lens);
+    rect(sx+18, sy+7, 4, 2, C.lens);
+    px(sx+10, sy+7, C.wing);
+    px(sx+18, sy+7, C.wing);
+
+    drawBossHealth(sx, sy, p);
+  }
+
+  // Its remaining lives, as little pips riding just above it.
+  function drawHelperLives(h) {
+    const sx = h.x | 0, sy = (h.y + HUD_H) | 0;
+    const above = sy - 4;
+    const y = above >= HUD_H + 1 ? above : sy + 17;
+    for (let i = 0; i < h.lives; i++) {
+      rect(sx + 1 + i * 5, y, 3, 2, C.help2);
+      rect(sx + 1 + i * 5, y, 3, 1, C.help1);
+    }
+  }
+
+  function drawBossHealth(sx, sy, p) {
+    // Normally above their head; slides under them when they hug the ceiling
+    const above = sy - 5;
+    const barY = above >= HUD_H + 2 ? above : sy + BOSS_SIZE + 2;
+    const bw = 28;
+    const fill = Math.max(0, Math.round(bw * p.hp / p.maxHp));
+    rect(sx+1, barY-1, bw+2, 5, C.rockD);
+    rect(sx+2, barY,   bw,   3, '#000000');
+    rect(sx+2, barY,   fill, 3, p.hp <= p.maxHp / 2 ? C.red : C.sq1);
+    // Flashing red outline: he is rearing up to swing. Let go.
+    if (lashWinding(p) && (p.lash % 8) < 4) {
+      rect(sx, sy, BOSS_SIZE, 1, C.red);
+      rect(sx, sy + BOSS_SIZE - 1, BOSS_SIZE, 1, C.red);
+      rect(sx, sy, 1, BOSS_SIZE, C.red);
+      rect(sx + BOSS_SIZE - 1, sy, 1, BOSS_SIZE, C.red);
+    }
+  }
+
+  // The Queen Mole: 32x32, brown, red bow, health bar over her head.
+  function drawQueen(p) {
+    const sx = p.x|0, sy = (p.y + HUD_H)|0;
+    const flash = p.hurtFlash > 0 && (p.hurtFlash % 8) < 4;
+    const body = flash ? C.text : C.mole1;
+    const dark = flash ? C.rock2 : C.mole2;
+    const puff = Math.min(3, p.pumped) * 2;
+
+    // bulk
+    rect(sx+4-puff,  sy+12-puff, 24+puff*2, 17+puff, dark);
+    rect(sx+6-puff,  sy+10-puff, 20+puff*2, 19+puff, body);
+    rect(sx+8,       sy+7,       16, 5, body);
+    // belly and snout
+    rect(sx+11, sy+18, 10, 9, C.moleBel);
+    rect(sx+13, sy+12,  6, 5, C.moleBel);
+    px(sx+14, sy+14, C.sqEye);
+    px(sx+17, sy+14, C.sqEye);
+    // eyes
+    rect(sx+10, sy+9, 2, 2, C.sqEye);
+    rect(sx+20, sy+9, 2, 2, C.sqEye);
+    // digging claws
+    rect(sx+1,  sy+19, 5, 7, C.rock1);
+    rect(sx+26, sy+19, 5, 7, C.rock1);
+    rect(sx+1,  sy+19, 5, 1, C.rock2);
+    rect(sx+26, sy+19, 5, 1, C.rock2);
+    // feet
+    rect(sx+8,  sy+28, 6, 3, dark);
+    rect(sx+18, sy+28, 6, 3, dark);
+    // the bow
+    rect(sx+8,  sy+1, 6, 7, C.red);
+    rect(sx+18, sy+1, 6, 7, C.red);
+    rect(sx+9,  sy+2, 4, 5, C.bowL);
+    rect(sx+19, sy+2, 4, 5, C.bowL);
+    rect(sx+14, sy+2, 4, 5, C.red);
+    rect(sx+15, sy+3, 2, 3, C.bowD);
+
+    drawBossHealth(sx, sy, p);
+  }
+
+  // A slug, 26x16 with its top-left at (x, y)
+  function drawSlug(x, y, angry) {
+    const c1 = angry ? C.worm1 : C.slug1;
+    const c2 = angry ? C.worm2 : C.slug2;
+    // eye stalks
+    rect(x+19, y+1,  1, 5, c1);
+    rect(x+23, y+1,  1, 5, c1);
+    rect(x+18, y,    2, 2, c1);
+    rect(x+22, y,    2, 2, c1);
+    px(x+19, y, C.sqEye);
+    px(x+23, y, C.sqEye);
+    // body
+    rect(x+1,  y+8,  23, 5, c2);
+    rect(x+2,  y+6,  21, 6, c1);
+    rect(x+6,  y+5,  13, 2, c1);
+    rect(x+17, y+4,   7, 4, c1);
+    rect(x+8,  y+8,   8, 1, c2);   // mantle line
+    rect(x,    y+12, 25, 2, c2);   // foot
+    rect(x+1,  y+7,   2, 2, c2);   // tail taper
+    if (angry) {
+      rect(x+18, y+6, 5, 1, C.sqEye);   // scowl
+      px(x+17, y+5, C.sqEye);
+      px(x+23, y+5, C.sqEye);
+    }
+  }
+
+  function drawSpeechBubble(cx, bottomY, text) {
+    const w = text.length * 4 + 6;
+    const h = 11;
+    const x = Math.floor(cx - w / 2);
+    const y = bottomY - h - 4;
+    rect(x, y, w, h, C.text);
+    rect(x + Math.floor(w / 2) - 1, y + h, 2, 3, C.text);
+    drawText(text, x + 3, y + 3, '#000000', 1);
+  }
+
+  function drawAsmScreen() {
+    ctx.fillStyle = 'rgba(0,0,0,0.88)';
+    ctx.fillRect(0, HUD_H, VW, PLAY_H);
+    drawCenter('ASM', 20, C.slug1, 2);
+    drawCenter('AUTO SLUG MACHINE', 34, C.text, 1);
+
+    // What you have, in both currencies
+    const pw = (8 + String(slugs).length * 4) + 14 + (8 + String(coins).length * 4);
+    let pxx = Math.floor((VW - pw) / 2);
+    pxx += drawPurse(pxx, 46, 'slug', slugs, C.slug1) + 14;
+    drawPurse(pxx, 46, 'coin', coins, C.coin1);
+
+    drawCenter(asmDir === 'buy'
+      ? 'BUY 1 BUCK: ' + ASM_BUY_RATE + ' COINS'
+      : 'SELL 1 BUCK: ' + ASM_RATE + ' COINS', 58, C.yellow, 1);
+
+    asmBounds.length = 0;
+
+    // Which way round the machine is pointing
+    const DIRS = [
+      { dir: 'sell', label: 'BUCKS TO COINS' },
+      { dir: 'buy',  label: 'COINS TO BUCKS' },
+    ];
+    const dw = 72, dh = 13, dgap = 6;
+    let dx = Math.floor((VW - (dw * DIRS.length + dgap * (DIRS.length - 1))) / 2);
+    for (let i = 0; i < DIRS.length; i++) {
+      const on = asmDir === DIRS[i].dir;
+      const sel = asmIndex === i;
+      drawSlab(dx, 70, dw, dh);
+      if (on) rect(dx + 1, 71, dw - 2, dh - 2, '#5c3a16');
+      if (sel) {
+        rect(dx, 70, dw, 1, C.yellow);
+        rect(dx, 70 + dh - 1, dw, 1, C.yellow);
+        rect(dx, 70, 1, dh, C.yellow);
+        rect(dx + dw - 1, 70, 1, dh, C.yellow);
+      }
+      drawText(DIRS[i].label, dx + Math.floor((dw - DIRS[i].label.length * 4) / 2), 74,
+               on ? C.slug1 : '#8b6a40', 1);
+      asmBounds.push({ x: dx, y: 70, w: dw, h: dh, idx: i });
+      dx += dw + dgap;
+    }
+
+    drawCenter(asmDir === 'buy' ? 'BUY SLUGBUCKS' : 'CASH IN SLUGBUCKS', 88, C.text, 1);
+
+    const bw = 40, bh = 16, gap = 6;
+    let bx = Math.floor((VW - (ASM_AMOUNTS.length * bw + (ASM_AMOUNTS.length - 1) * gap)) / 2);
+    for (let i = 0; i < ASM_AMOUNTS.length; i++) {
+      const label = String(ASM_AMOUNTS[i]);
+      const sel = asmIndex === ASM_IDX_AMOUNT0 + i;
+      drawSlab(bx, 98, bw, bh);
+      if (sel) rect(bx + 1, 99, bw - 2, bh - 2, '#5c3a16');
+      drawText(label, bx + Math.floor((bw - label.length * 4) / 2), 103, sel ? C.yellow : C.slug1, 1);
+      asmBounds.push({ x: bx, y: 98, w: bw, h: bh, idx: ASM_IDX_AMOUNT0 + i });
+      bx += bw + gap;
+    }
+
+    if (asmMsgTimer > 0) drawCenter(asmMsg, 120, asmMsgColor, 1);
+
+    // The machine's slug. Poke him and he says hello.
+    drawSlug(SLUG_POS.x, SLUG_POS.y, slugAngry > 0);
+    asmBounds.push({
+      x: SLUG_POS.x - 6, y: SLUG_POS.y - 6,
+      w: SLUG_POS.w + 12, h: SLUG_POS.h + 12,
+      idx: ASM_IDX_SLUG,
+    });
+    if (asmIndex === ASM_IDX_SLUG) drawPointer(SLUG_POS.x - 16, SLUG_POS.y + 6);
+    if (slugTalk > 0) drawSpeechBubble(SLUG_POS.x + 13, SLUG_POS.y, slugLine);
+
+    drawBackButton(184);
+    asmBounds.push({
+      x: backBtnBounds.x, y: backBtnBounds.y,
+      w: backBtnBounds.w, h: backBtnBounds.h,
+      idx: ASM_IDX_BACK,
+    });
+    if (asmIndex === ASM_IDX_BACK) drawPointer(backBtnBounds.x - 2, 184);
+
+    drawCenter('ARROWS: PICK   ENTER: OK', VH - 12, C.text, 1);
+  }
+
+  // Title-screen poster button, 28x26 inside its tap box
+  function drawWantedButton() {
+    const x = wantedBtnBounds.x + 1, y = wantedBtnBounds.y + 1;
+    rect(x, y, 28, 26, C.paperD);
+    rect(x+1, y+1, 26, 24, C.paper);
+    drawText('WANTED', x+2, y+3, C.paperD, 1);
+    rect(x+2, y+9, 24, 1, C.paperD);
+    // mugshot
+    rect(x+9,  y+12, 10, 9, C.paperD);
+    rect(x+10, y+13,  8, 7, '#3a2a12');
+    px(x+12, y+15, C.paper);
+    px(x+16, y+15, C.paper);
+    rect(x+12, y+18, 5, 1, C.paper);
+    rect(x+3, y+22, 22, 1, C.paperD);
+  }
+
+  // Small 20x20 boss portraits for the wanted list
+  function drawQueenFace(x, y) {
+    rect(x+2,  y+6,  16, 13, C.mole2);
+    rect(x+3,  y+5,  14, 13, C.mole1);
+    rect(x+6,  y+10,  8,  7, C.moleBel);
+    rect(x+7,  y+9,   6,  4, C.moleBel);
+    px(x+6,  y+8, C.sqEye);
+    px(x+13, y+8, C.sqEye);
+    rect(x+2,  y+1, 5, 5, C.red);
+    rect(x+13, y+1, 5, 5, C.red);
+    rect(x+3,  y+2, 3, 3, C.bowL);
+    rect(x+14, y+2, 3, 3, C.bowL);
+    rect(x+8,  y+2, 4, 4, C.red);
+    rect(x+9,  y+3, 2, 2, C.bowD);
+  }
+
+  function drawKingFace(x, y) {
+    rect(x+2, y+5, 16, 14, C.horn2);
+    rect(x+3, y+6, 14, 12, C.horn1);
+    rect(x+1, y+9, 18,  4, C.sqEye);
+    rect(x+3,  y+10, 5, 2, C.lens);
+    rect(x+12, y+10, 5, 2, C.lens);
+    px(x+3,  y+10, C.wing);
+    px(x+12, y+10, C.wing);
+    rect(x+7, y+15, 6, 1, C.horn2);
+    rect(x+5, y+2, 10, 3, C.coin1);
+    px(x+5,  y+1, C.coin1);
+    px(x+9,  y,   C.coin1);
+    px(x+14, y+1, C.coin1);
+  }
+
+  function drawBossPick() {
+    ctx.fillStyle = 'rgba(0,0,0,0.9)';
+    ctx.fillRect(0, HUD_H, VW, PLAY_H);
+    drawCenter('WANTED', 24, C.paper, 2);
+    drawCenter('PICK A FIGHT', 44, C.text, 1);
+
+    bossPickBounds.length = 0;
+    const rows = WANTED.length + 1;
+    const baseY = 62, lineH = 32;
+    for (let i = 0; i < rows; i++) {
+      const y = baseY + i * lineH;
+      const sel = bossPickIndex === i;
+      if (i === WANTED.length) {
+        const label = 'BACK';
+        const lx = Math.floor((VW - label.length * 4) / 2);
+        drawText(label, lx, y, sel ? C.yellow : C.text, 1);
+        if (sel) drawPointer(lx - 12, y);
+        bossPickBounds.push({ x: lx - 16, y: y - 5, w: label.length * 4 + 24, h: 14, idx: i });
+        continue;
+      }
+      const w = WANTED[i];
+      if (w.face === 'queen') drawQueenFace(62, y - 2);
+      else if (w.face === 'king') drawKingFace(62, y - 2);
+      else drawJesterFace(62, y - 2);
+      drawText(w.label, 96, y + 4, sel ? C.yellow : C.text, 1);
+      drawText('BURROW ' + w.level, 96, y + 16, C.rock1, 1);
+      if (sel) drawPointer(84, y + 4);
+      bossPickBounds.push({ x: 56, y: y - 4, w: 150, h: 28, idx: i });
+    }
+
+    drawCenter('ENTER: FIGHT   ESC: BACK', VH - 12, C.text, 1);
+  }
+
+  // Every pointer fits an 8x7 box with its tip on the right, at (x, y-1).
+  function drawCursorWorm(x, y) {
+    rect(x, y - 1, 8, 7, C.worm2);
+    rect(x + 1, y, 6, 5, C.worm1);
+    ctx.fillStyle = C.wormE;
+    ctx.fillRect(x + 6, y + 1, 1, 1);
+  }
+
+  function drawCursorPD(x, y) {
+    px(x + 1, y - 1, C.pd2);                // ears
+    px(x + 6, y - 1, C.pd2);
+    rect(x + 1, y, 6, 4, C.pd1);            // head
+    rect(x + 1, y, 6, 1, C.pd2);
+    rect(x + 4, y + 2, 4, 2, C.pdBel);      // pale snout, out to the tip
+    px(x + 3, y + 1, C.sqEye);              // eye
+    rect(x + 2, y + 4, 4, 1, C.pd2);        // chin
+    px(x + 2, y + 5, C.pd2);                // paws
+    px(x + 5, y + 5, C.pd2);
+  }
+
+  function drawCursorSquiggle(x, y) {
+    rect(x, y + 3, 4, 2, C.sq2);            // three steps of wiggle,
+    rect(x + 2, y + 1, 4, 2, C.sq2);        // climbing to the head
+    rect(x + 4, y - 1, 4, 2, C.sq2);
+    rect(x, y + 3, 4, 1, C.sq1);
+    rect(x + 2, y + 1, 4, 1, C.sq1);
+    rect(x + 4, y - 1, 4, 1, C.sq1);
+  }
+
+  function drawCursorRock(x, y) {
+    rect(x + 1, y - 1, 6, 1, C.rockD);      // outline, same shape as a real one
+    rect(x, y, 1, 5, C.rockD);
+    rect(x + 7, y, 1, 5, C.rockD);
+    rect(x + 1, y + 5, 6, 1, C.rockD);
+    rect(x + 1, y, 6, 5, C.rock1);          // stone
+    rect(x + 5, y, 2, 5, C.rock2);          // shaded down the right
+    rect(x + 1, y + 4, 6, 1, C.rock2);      // and along the bottom
+  }
+
+  function drawCursorAnt(x, y) {
+    px(x + 2, y - 1, C.antD);               // antennae
+    px(x + 6, y - 1, C.antD);
+    rect(x + 3, y - 1, 3, 2, C.antD);       // head
+    px(x + 3, y, C.pupil);
+    px(x + 5, y, C.pupil);
+    rect(x + 3, y + 1, 3, 2, C.ant1);       // thorax
+    rect(x + 2, y + 3, 5, 3, C.antD);       // abdomen
+    rect(x + 3, y + 4, 3, 1, C.ant1);
+    px(x + 1, y + 1, C.antD);               // legs
+    px(x + 6, y + 1, C.antD);
+    px(x + 1, y + 3, C.antD);
+    px(x + 7, y + 3, C.antD);
+  }
+
+  function drawCursorBurger(x, y) {
+    rect(x + 1, y - 1, 6, 1, C.pdBel);      // crown of the bun
+    rect(x, y, 8, 1, C.pdBel);
+    px(x + 2, y - 1, C.text);               // sesame seeds
+    px(x + 5, y - 1, C.text);
+    rect(x, y + 1, 8, 1, C.coin1);          // cheese
+    rect(x, y + 2, 8, 1, C.sq1);            // lettuce
+    rect(x, y + 3, 8, 2, C.mole2);          // the patty
+    rect(x + 1, y + 5, 6, 1, C.pd2);        // bottom bun
+  }
+
+  function drawCursorPizza(x, y) {
+    rect(x, y - 1, 2, 7, C.pd2);            // the crust, widest at the back
+    rect(x + 1, y, 1, 5, C.coin2);
+    rect(x + 2, y, 2, 5, C.coin1);          // cheese, tapering to the tip
+    rect(x + 4, y + 1, 2, 3, C.coin1);
+    rect(x + 6, y + 2, 2, 1, C.coin1);
+    px(x + 2, y + 1, C.red);                // pepperoni
+    px(x + 3, y + 3, C.red);
+    px(x + 5, y + 2, C.red);
+  }
+
+  function drawCursorDonut(x, y) {
+    rect(x + 1, y - 1, 6, 7, C.pd2);        // dough
+    rect(x + 1, y, 6, 5, C.candy);          // pink icing over the top
+    rect(x + 2, y - 1, 4, 7, C.candy);
+    rect(x + 3, y + 1, 2, 3, C.tunnel);     // the hole
+    px(x + 2, y, C.text);                   // sprinkles
+    px(x + 5, y + 1, C.sq1);
+    px(x + 3, y + 4, C.coin1);
+    px(x + 6, y + 3, C.text);
+  }
+
+  function drawCursorFries(x, y) {
+    rect(x + 2, y - 1, 1, 3, C.coin1);      // three fries poking out
+    rect(x + 4, y - 1, 1, 3, C.coin2);
+    rect(x + 6, y - 1, 1, 3, C.coin1);
+    rect(x + 1, y + 1, 6, 3, C.red);        // the carton
+    rect(x + 2, y + 2, 4, 1, C.text);       // white band round it
+    rect(x + 2, y + 4, 4, 2, C.bowD);
+  }
+
+  function drawCursorCupcake(x, y) {
+    px(x + 3, y - 1, C.red);                // cherry
+    px(x + 4, y - 1, C.red);
+    rect(x + 1, y, 6, 2, C.candy);          // frosting
+    rect(x + 2, y, 4, 1, C.text);           // a shine on the swirl
+    rect(x + 1, y + 2, 6, 1, C.coin2);      // wrapper rim
+    rect(x + 2, y + 3, 4, 3, C.coin1);      // wrapper
+    px(x + 3, y + 4, C.coin2);              // pleats
+    px(x + 5, y + 4, C.coin2);
+  }
+
+  function drawCursorSun(x, y) {
+    rect(x + 2, y, 4, 4, C.coin2);          // disc
+    rect(x + 3, y, 2, 4, C.coin1);
+    rect(x + 2, y + 1, 4, 2, C.coin1);
+    px(x + 3, y + 1, C.text);               // glint
+    rect(x + 3, y - 1, 2, 1, C.coin1);      // rays, four straight
+    rect(x + 3, y + 4, 2, 1, C.coin1);
+    rect(x, y + 1, 1, 2, C.coin1);
+    rect(x + 7, y + 1, 1, 2, C.coin1);
+    px(x + 1, y - 1, C.coin2);              // and four on the diagonals
+    px(x + 6, y - 1, C.coin2);
+    px(x + 1, y + 4, C.coin2);
+    px(x + 6, y + 4, C.coin2);
+  }
+
+  function drawCursorMoon(x, y) {
+    rect(x + 2, y - 1, 3, 1, C.wing);       // crescent, horns curling right
+    rect(x + 1, y, 2, 1, C.wing);
+    rect(x + 1, y + 1, 2, 2, C.wing);
+    rect(x + 1, y + 3, 2, 1, C.wing);
+    rect(x + 2, y + 4, 3, 1, C.wing);
+    px(x + 5, y, C.wing);
+    px(x + 5, y + 3, C.wing);
+    px(x + 2, y + 1, C.text);               // bright face
+    px(x + 7, y + 1, C.coin1);              // a star alongside
+  }
+
+  function drawCursorTeddy(x, y) {
+    rect(x, y - 1, 2, 3, C.ted2);           // big round ears, out at the sides
+    rect(x + 6, y - 1, 2, 3, C.ted2);
+    px(x, y, C.ted1);
+    px(x + 7, y, C.ted1);
+    rect(x + 1, y, 6, 5, C.ted2);           // head
+    rect(x + 2, y, 4, 4, C.ted1);
+    px(x + 2, y + 1, C.sqEye);              // eyes
+    px(x + 5, y + 1, C.sqEye);
+    rect(x + 3, y + 2, 2, 2, C.text);       // stitched muzzle
+    px(x + 3, y + 2, C.sqEye);              // nose
+    rect(x + 2, y + 5, 4, 1, C.red);        // a bow at the neck, because it is a toy
+  }
+
+  function drawCursorIcecream(x, y) {
+    rect(x + 2, y - 1, 4, 3, C.candy);      // the scoop
+    rect(x + 1, y, 6, 2, C.candy);
+    px(x + 3, y - 1, C.text);               // highlight
+    rect(x + 2, y + 2, 4, 1, C.pd1);        // cone, tapering down
+    rect(x + 2, y + 3, 4, 1, C.pd2);
+    rect(x + 3, y + 4, 2, 1, C.pd2);
+    px(x + 3, y + 5, C.pd2);
+  }
+
+  function drawCursorCookie(x, y) {
+    rect(x + 2, y - 1, 4, 7, C.pdBel);      // a round biscuit
+    rect(x + 1, y, 6, 5, C.pdBel);
+    rect(x, y + 1, 8, 3, C.pdBel);
+    px(x + 2, y, C.mole2);                  // chocolate chips
+    px(x + 5, y + 1, C.mole2);
+    px(x + 3, y + 3, C.mole2);
+    px(x + 6, y + 3, C.mole2);
+  }
+
+  function drawCursorSushi(x, y) {
+    rect(x + 1, y - 1, 6, 7, C.sq2);        // a ring of seaweed all round
+    rect(x + 2, y, 4, 5, C.text);           // rice inside it
+    rect(x + 3, y + 1, 2, 3, C.worm1);      // fish in the middle
+  }
+
+  function drawCursorLolly(x, y) {
+    rect(x, y + 2, 4, 1, C.pdBel);          // the stick
+    rect(x + 3, y, 5, 5, C.worm2);          // candy, outlined
+    rect(x + 4, y - 1, 3, 7, C.worm2);
+    rect(x + 4, y, 3, 5, C.candy);
+    rect(x + 3, y + 1, 5, 3, C.candy);
+    px(x + 5, y + 1, C.text);               // swirl
+    px(x + 4, y + 2, C.text);
+    px(x + 6, y + 3, C.text);
+  }
+
+  function drawCursorCane(x, y) {
+    rect(x + 2, y - 1, 5, 2, C.text);       // hook over the top
+    rect(x + 5, y + 1, 2, 2, C.text);
+    rect(x + 2, y + 1, 2, 5, C.text);       // and the long shaft
+    rect(x + 3, y - 1, 2, 1, C.red);        // stripes, bold enough to read
+    rect(x + 5, y + 2, 2, 1, C.red);
+    rect(x + 2, y + 2, 2, 1, C.red);
+    rect(x + 2, y + 4, 2, 1, C.red);
+  }
+
+  function drawCursorChoc(x, y) {
+    rect(x, y, 3, 5, C.steel);              // torn foil at the end
+    rect(x + 2, y - 1, 6, 7, C.mole2);
+    rect(x + 3, y, 4, 5, C.pd2);            // the bar
+    rect(x + 5, y, 1, 5, C.mole2);          // scored into squares
+    rect(x + 3, y + 2, 4, 1, C.mole2);
+  }
+
+  function drawCursorCoin(x, y) { drawCoin(x + 1, y); }
+  function drawCursorSlugBuck(x, y) { drawSlugBuck(x + 1, y); }
+
+  function drawCursorHand(x, y) {
+    rect(x, y - 1, 5, 7, C.pd2);          // the fist, outlined
+    rect(x + 1, y, 3, 5, C.pdBel);
+    rect(x + 4, y + 1, 4, 3, C.pd2);      // and one finger doing the work
+    rect(x + 4, y + 2, 3, 1, C.pdBel);
+  }
+
+  function drawCursorArrow(x, y) {
+    rect(x, y + 1, 5, 3, C.steelD);       // shaft
+    rect(x, y + 2, 4, 1, C.steel);
+    rect(x + 4, y - 1, 1, 7, C.steelD);   // head, tapering to the tip
+    rect(x + 5, y, 1, 5, C.steelD);
+    rect(x + 6, y + 1, 1, 3, C.steelD);
+    px(x + 7, y + 2, C.steelD);
+    rect(x + 5, y + 1, 1, 3, C.steel);
+    px(x + 6, y + 2, C.steel);
+  }
+
+  function drawCursorCarrot(x, y) {
+    rect(x, y - 1, 2, 2, C.sq2);          // leafy top
+    rect(x, y + 3, 2, 2, C.sq1);
+    rect(x + 1, y - 1, 2, 7, C.carrot);
+    rect(x + 3, y, 2, 5, C.carrot);
+    rect(x + 5, y + 1, 2, 3, C.carrot);
+    px(x + 7, y + 2, C.carrot);
+    px(x + 2, y + 1, C.coin1);            // a nick of light
+  }
+
+  function drawCursorRocket(x, y) {
+    rect(x, y + 1, 2, 3, C.red);          // exhaust
+    px(x, y + 2, C.coin1);
+    rect(x + 2, y - 1, 2, 1, C.steelD);   // fins
+    rect(x + 2, y + 5, 2, 1, C.steelD);
+    rect(x + 2, y, 4, 5, C.steel);        // body
+    rect(x + 2, y + 1, 4, 1, C.text);
+    rect(x + 6, y + 1, 1, 3, C.red);      // nose cone
+    px(x + 7, y + 2, C.red);
+  }
+
+  function drawCursorStar(x, y) {
+    rect(x + 3, y - 1, 2, 3, C.coin1);    // top point
+    rect(x, y + 1, 8, 2, C.coin1);        // arms
+    rect(x + 2, y + 3, 4, 1, C.coin1);
+    rect(x + 1, y + 4, 2, 2, C.coin2);    // legs
+    rect(x + 5, y + 4, 2, 2, C.coin2);
+    px(x + 3, y + 1, C.text);             // glint
+  }
+
+  function drawCursorSlug(x, y) {
+    rect(x, y + 1, 8, 4, C.slug2);
+    rect(x, y + 1, 7, 2, C.slug1);
+    rect(x + 5, y - 1, 1, 2, C.slug1);    // eyestalks
+    rect(x + 7, y - 1, 1, 2, C.slug1);
+    px(x + 5, y - 2, C.sqEye);
+    px(x + 7, y - 2, C.sqEye);
+  }
+
+  function drawCursorCrown(x, y) {
+    rect(x + 1, y + 2, 6, 3, C.coin2);
+    rect(x + 1, y + 2, 6, 2, C.coin1);
+    rect(x + 1, y, 1, 2, C.coin1);        // three points
+    rect(x + 3, y - 1, 2, 3, C.coin1);
+    rect(x + 6, y, 1, 2, C.coin1);
+    px(x + 3, y + 3, C.red);              // one jewel
+  }
+
+  const CURSOR_ART = {
+    worm: drawCursorWorm, pd: drawCursorPD, squig: drawCursorSquiggle,
+    ant: drawCursorAnt, burger: drawCursorBurger,
+    rock: drawCursorRock, hand: drawCursorHand, arrow: drawCursorArrow,
+    carrot: drawCursorCarrot, lolly: drawCursorLolly, cane: drawCursorCane,
+    choc: drawCursorChoc, pizza: drawCursorPizza, donut: drawCursorDonut,
+    icecrm: drawCursorIcecream, cookie: drawCursorCookie, sushi: drawCursorSushi,
+    teddy: drawCursorTeddy, fries: drawCursorFries, cake: drawCursorCupcake,
+    sun: drawCursorSun, moon: drawCursorMoon,
+    rocket: drawCursorRocket, star: drawCursorStar, coin: drawCursorCoin,
+    buck: drawCursorSlugBuck, slug: drawCursorSlug, crown: drawCursorCrown,
+  };
+
+  function drawCursorArt(id, x, y) {
+    (CURSOR_ART[id] || drawCursorWorm)(x, y);
+  }
+
+  // Whatever pointer is in use, wherever a menu needs one.
+  function drawPointer(x, y) {
+    drawCursorArt(cursorEquipped, x, y);
+  }
+
+  // Worker ant at (x, y), seen from above so it reads walking any direction.
+  function drawAnt(x, y, pump) {
+    const sx = x|0, sy = (y + HUD_H)|0;
+    if (pump >= 1) {
+      const sz = 12 + Math.floor(pump);
+      const ox = sx + Math.floor((16 - sz) / 2);
+      const oy = sy + Math.floor((16 - sz) / 2);
+      rect(ox, oy+1, sz, sz-2, C.antD);
+      rect(ox+1, oy, sz-2, sz, C.antD);
+      rect(ox+1, oy+1, sz-2, sz-2, C.ant1);
+      px(ox+3, oy+3, C.pupil);
+      px(ox+sz-4, oy+3, C.pupil);
+      rect(ox+Math.floor(sz/2)-1, oy+Math.floor(sz/2)+1, 2, 2, C.pupil);
+      return;
+    }
+    // six legs, behind the body
+    rect(sx+2,  sy+6, 4, 1, C.antD);  rect(sx+2,  sy+6, 1, 2, C.antD);
+    rect(sx+2,  sy+9, 4, 1, C.antD);  rect(sx+2,  sy+9, 1, 3, C.antD);
+    rect(sx+10, sy+6, 4, 1, C.antD);  rect(sx+13, sy+6, 1, 2, C.antD);
+    rect(sx+10, sy+9, 4, 1, C.antD);  rect(sx+13, sy+9, 1, 3, C.antD);
+    // abdomen, thorax, head
+    rect(sx+5, sy+9, 6, 5, C.antD);
+    rect(sx+6, sy+9, 4, 4, C.ant1);
+    rect(sx+6, sy+5, 4, 4, C.antD);
+    rect(sx+6, sy+6, 3, 2, C.ant1);
+    rect(sx+5, sy+1, 6, 4, C.antD);
+    rect(sx+6, sy+2, 4, 2, C.ant1);
+    // antennae and eyes
+    px(sx+4, sy, C.antD);
+    px(sx+11, sy, C.antD);
+    px(sx+6, sy+2, C.pupil);
+    px(sx+9, sy+2, C.pupil);
+  }
+
+  // Prairie dog sprite at (x, y), pump level 0..3
+  function drawPD(x, y, dir, pump) {
+    const sx = x|0, sy = (y + HUD_H)|0;
+    const scale = 1 + pump * 0.15;
+    const grow = Math.floor(pump);
+    // Inflate: draw a larger circle when pumped
+    if (pump >= 1) {
+      // bloated body
+      const sz = 12 + grow * 1;
+      const ox = sx + Math.floor((16 - sz) / 2);
+      const oy = sy + Math.floor((16 - sz) / 2);
+      rect(ox, oy+1, sz, sz-2, C.pd2);
+      rect(ox+1, oy, sz-2, sz, C.pd2);
+      rect(ox+1, oy+1, sz-2, sz-2, C.pd1);
+      rect(ox+2, oy+2, sz-4, sz-4, C.pdBel);
+      // tiny eyes
+      px(ox+3, oy+3, C.pupil);
+      px(ox+sz-4, oy+3, C.pupil);
+      // mouth O
+      rect(ox+Math.floor(sz/2)-1, oy+Math.floor(sz/2)+1, 2, 2, C.pupil);
+      return;
+    }
+
+    // Standing prairie dog (8-bit chunky)
+    // Body
+    rect(sx+4, sy+6, 8, 8, C.pd2);
+    rect(sx+5, sy+6, 6, 8, C.pd1);
+    // Belly
+    rect(sx+6, sy+9, 4, 4, C.pdBel);
+    // Head
+    rect(sx+5, sy+2, 6, 5, C.pd2);
+    rect(sx+6, sy+2, 4, 5, C.pd1);
+    // Snout
+    rect(sx+7, sy+5, 2, 2, C.pdBel);
+    // Ears
+    px(sx+5, sy+1, C.pd2);
+    px(sx+10, sy+1, C.pd2);
+    // Eyes
+    px(sx+6, sy+3, C.pupil);
+    px(sx+9, sy+3, C.pupil);
+    // Nose
+    px(sx+7, sy+5, C.pupil);
+    // Arms (little paws)
+    rect(sx+3, sy+7, 1, 3, C.pd2);
+    rect(sx+12, sy+7, 1, 3, C.pd2);
+    // Feet
+    rect(sx+4, sy+13, 3, 2, C.pd2);
+    rect(sx+9, sy+13, 3, 2, C.pd2);
+    // Direction-tint: face shift
+    if (dir === 'L') { px(sx+5, sy+3, C.pupil); }
+    if (dir === 'R') { px(sx+10, sy+3, C.pupil); }
+  }
+
+  // Squiggle sprite: a wavy green critter (16x16) facing dir
+  function drawSquiggle(x, y, dir, phase, pump) {
+    const sx = x|0, sy = (y + HUD_H)|0;
+    if (pump >= 1) {
+      // Same bloated body as PDs when squirted, just green
+      const grow = Math.floor(pump);
+      const sz = 12 + grow * 1;
+      const ox = sx + Math.floor((16 - sz) / 2);
+      const oy = sy + Math.floor((16 - sz) / 2);
+      rect(ox, oy+1, sz, sz-2, C.sq2);
+      rect(ox+1, oy, sz-2, sz, C.sq2);
+      rect(ox+1, oy+1, sz-2, sz-2, C.sq1);
+      // tiny eyes
+      px(ox+3, oy+3, C.sqEye);
+      px(ox+sz-4, oy+3, C.sqEye);
+      // mouth O
+      rect(ox+Math.floor(sz/2)-1, oy+Math.floor(sz/2)+1, 2, 2, C.sqEye);
+      return;
+    }
+    // Six 2x3 segments arranged in a sine wave across the sprite
+    // phase animates the wave shape
+    const horizontal = dir === 'L' || dir === 'R';
+    const segs = 6;
+    for (let i = 0; i < segs; i++) {
+      const t = (i + phase) * 0.9;
+      const wave = Math.round(Math.sin(t) * 2);   // -2..+2
+      let cx, cy;
+      if (horizontal) {
+        cx = sx + 2 + i * 2;
+        cy = sy + 7 + wave;
+      } else {
+        cx = sx + 7 + wave;
+        cy = sy + 2 + i * 2;
+      }
+      rect(cx, cy, 3, 3, C.sq2);
+      rect(cx, cy, 2, 2, C.sq1);
+    }
+    // Head: extra blob with an eye on the leading end
+    let hx, hy;
+    if (dir === 'R')      { hx = sx + 13; hy = sy + 7 + Math.round(Math.sin((segs + phase) * 0.9) * 2); }
+    else if (dir === 'L') { hx = sx + 0;  hy = sy + 7 + Math.round(Math.sin((-1 + phase) * 0.9) * 2); }
+    else if (dir === 'D') { hx = sx + 7 + Math.round(Math.sin((segs + phase) * 0.9) * 2); hy = sy + 13; }
+    else                  { hx = sx + 7 + Math.round(Math.sin((-1 + phase) * 0.9) * 2); hy = sy + 0; }
+    rect(hx, hy, 3, 3, C.sq2);
+    rect(hx, hy, 2, 2, C.sq1);
+    // Eye
+    if (dir === 'R')      px(hx + 2, hy + 0, C.sqEye);
+    else if (dir === 'L') px(hx + 0, hy + 0, C.sqEye);
+    else if (dir === 'D') px(hx + 0, hy + 2, C.sqEye);
+    else                  px(hx + 0, hy + 0, C.sqEye);
+  }
+
+  function drawSquirt(ent, color) {
+    if (!ent || !ent.squirting || !ent.squirtTarget) return;
+    const cx = ent.x + 8;
+    const cy = ent.y + 8 + HUD_H;
+    const tgt = ent.squirtTarget;
+    const tx = tgt.x + 8;
+    const ty = tgt.y + 8 + HUD_H;
+    // The ink turns red when the boss on the end of it is about to swing
+    ctx.fillStyle = lashWinding(tgt) ? C.red : color;
+    // Draw dotted line of squirt particles
+    const dx = tx - cx, dy = ty - cy;
+    const len = Math.hypot(dx, dy);
+    const steps = Math.max(2, Math.floor(len / 3));
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      const wob = ((ent.squirtTimer + i * 3) % 6) - 3;
+      const px = cx + dx * t + (Math.abs(dx) > 0 ? 0 : wob);
+      const py = cy + dy * t + (Math.abs(dy) > 0 ? 0 : wob);
+      ctx.fillRect((px-1)|0, (py-1)|0, 2, 2);
+    }
+  }
+
+  // 3x5 pixel font, uppercase + digits + a few symbols
+  const FONT = {
+    'A':['010','101','111','101','101'],
+    'B':['110','101','110','101','110'],
+    'C':['011','100','100','100','011'],
+    'D':['110','101','101','101','110'],
+    'E':['111','100','110','100','111'],
+    'F':['111','100','110','100','100'],
+    'G':['011','100','101','101','011'],
+    'H':['101','101','111','101','101'],
+    'I':['111','010','010','010','111'],
+    'J':['001','001','001','101','010'],
+    'K':['101','101','110','101','101'],
+    'L':['100','100','100','100','111'],
+    'M':['101','111','111','101','101'],
+    'N':['101','111','111','111','101'],
+    'O':['010','101','101','101','010'],
+    'P':['110','101','110','100','100'],
+    'Q':['010','101','101','111','011'],
+    'R':['110','101','110','101','101'],
+    'S':['011','100','010','001','110'],
+    'T':['111','010','010','010','010'],
+    'U':['101','101','101','101','111'],
+    'V':['101','101','101','101','010'],
+    'W':['101','101','111','111','101'],
+    'X':['101','101','010','101','101'],
+    'Y':['101','101','010','010','010'],
+    'Z':['111','001','010','100','111'],
+    '0':['111','101','101','101','111'],
+    '1':['010','110','010','010','111'],
+    '2':['110','001','010','100','111'],
+    '3':['110','001','010','001','110'],
+    '4':['101','101','111','001','001'],
+    '5':['111','100','110','001','110'],
+    '6':['011','100','110','101','010'],
+    '7':['111','001','010','100','100'],
+    '8':['010','101','010','101','010'],
+    '9':['010','101','011','001','110'],
+    ' ':['000','000','000','000','000'],
+    ':':['000','010','000','010','000'],
+    '!':['010','010','010','000','010'],
+    '?':['110','001','010','000','010'],
+    '-':['000','000','111','000','000'],
+    '+':['000','010','111','010','000'],
+    '=':['000','111','000','111','000'],
+    '/':['001','001','010','100','100'],
+    '.':['000','000','000','000','010'],
+    ',':['000','000','000','010','100'],
+    'x':['000','101','010','101','000'],
+  };
+  function drawText(str, x, y, color, scale = 1) {
+    str = str.toUpperCase();
+    let cx = x;
+    for (let i = 0; i < str.length; i++) {
+      let ch = str[i];
+      if (ch === 'X' && /[0-9]/.test(str[i-1] || '')) ch = 'x';
+      const glyph = FONT[ch] || FONT[' '];
+      for (let r = 0; r < 5; r++) {
+        for (let c = 0; c < 3; c++) {
+          if (glyph[r][c] === '1') {
+            ctx.fillStyle = color;
+            ctx.fillRect(cx + c*scale, y + r*scale, scale, scale);
+          }
+        }
+      }
+      cx += 4 * scale;
+    }
+  }
+
+  function drawHUD() {
+    rect(0, 0, VW, HUD_H, '#000');
+    drawText('SCORE ' + String(score).padStart(5,'0'), 2, 5, C.text, 1);
+    drawPurse(50, 5, 'coin', coins, coinFlash > 0 ? C.coin1 : C.text);
+    drawPurse(88, 5, 'slug', slugs, slugFlash > 0 ? C.slug1 : C.text);
+    drawText('LV ' + level, 122, 5, C.yellow, 1);
+    // Lives as little worm icons
+    for (let i = 0; i < Math.min(lives, 8); i++) {
+      const lx = 150 + i*10;
+      rect(lx, 6, 8, 4, C.worm2);
+      rect(lx+1, 7, 6, 2, C.worm1);
+    }
+    // Bail-out button, only while a run is going
+    if (gameState === 'play') {
+      const bx = menuBtnBounds.x + 2;
+      rect(bx, 2, 24, 12, '#3a1c0a');
+      rect(bx, 2, 24, 1, C.dirt1);
+      rect(bx, 13, 24, 1, '#000000');
+      drawText('MENU', bx + 4, 5, C.text, 1);
+    }
+  }
+
+  function draw() {
+    rect(0, 0, VW, VH, '#000');
+    drawHUD();
+    // Sky/grass strip at very top of play area (just visual)
+    // Tiles
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const t = grid[r][c];
+        if (t === DIRT) drawDirtTile(c, r);
+        else if (t === EMPTY) drawTunnelTile(c, r);
+        else if (t === ROCK) drawRockTile(c, r);
+      }
+    }
+    // Falling rocks
+    for (const rk of rocks) {
+      drawRockAt(rk.x, rk.y + HUD_H);
+    }
+    // Enemies (prairie dogs + squiggles)
+    for (const p of pds) {
+      if (!p.alive) continue;
+      if (p.type === 'king') drawKing(p);
+      else if (p.type === 'jester') drawJester(p);
+      else if (p.type === 'queen') drawQueen(p);
+      else if (p.type === 'squiggle') drawSquiggle(p.x, p.y, p.dir, p.wiggle, p.pumped);
+      else if (p.type === 'ant') drawAnt(p.x, p.y, p.pumped);
+      else drawPD(p.x, p.y, p.dir, p.pumped);
+    }
+    // Conjured helper worm
+    if (helper) {
+      if (helper.invuln <= 0 || (helper.invuln % 6) < 3) {
+        drawWorm(helper.x, helper.y, helper.dir, helper.bodyTrail, C.help1, C.help2);
+        drawHatOn(helper.x, helper.y + HUD_H, helper.dir, 'magic');
+      }
+      drawSquirt(helper, C.magic1);
+      drawHelperLives(helper);
+    }
+    // Player
+    if (player.alive) {
+      if (player.invuln <= 0 || (player.invuln % 6) < 3) {
+        drawWorm(player.x, player.y, player.dir, player.bodyTrail, C.worm1, C.worm2);
+        drawHatOn(player.x, player.y + HUD_H, player.dir, equipped);
+      }
+    }
+    // Squirt
+    drawSquirt(player, C.squirt);
+    if (armorFlash > 0 && gameState === 'play') {
+      drawCenter('CLANG!', VH/2 - 40, C.steel, 2);
+    }
+    if (domeFlash > 0 && gameState === 'play') {
+      drawCenter('THE DOME CRACKS!', VH/2 - 40, C.wing, 1);
+    }
+    if (helperGoneMsg > 0 && gameState === 'play') {
+      drawCenter('YOUR HELPER IS GONE!', VH/2 - 28, C.help1, 1);
+    }
+    if (sporeFlash > 0 && gameState === 'play') {
+      drawSpores(sporeAt.x, sporeAt.y + HUD_H, sporeFlash);
+    }
+    if (bossGuardMsg > 0 && gameState === 'play') {
+      drawCenter('ROCKS BOUNCE OFF!', VH/2 - 52, C.rock1, 1);
+    }
+    if (gameState === 'play' && player.squirting && lashWinding(player.squirtTarget)
+        && (Math.floor(performance.now()/120) % 2) === 0) {
+      drawCenter('LET GO!', VH/2 - 64, C.red, 2);
+    }
+
+    // Overlays
+    if (gameState === 'menu') {
+      drawMenu();
+    } else if (gameState === 'shop') {
+      drawShop();
+    } else if (gameState === 'cursors') {
+      drawCursorShop();
+    } else if (gameState === 'asm') {
+      drawAsmScreen();
+    } else if (gameState === 'bosspick') {
+      drawBossPick();
+    } else if (gameState === 'code') {
+      drawCodeScreen();
+    } else if (gameState === 'cheat') {
+      drawCheatScreen();
+    } else if (gameState === 'howto') {
+      drawHowTo();
+    } else if (gameState === 'dead') {
+      drawCenter(
+        deathCause === 'squish' ? 'SQUISHED!' :
+        deathCause === 'tangle' ? 'TANGLED!' :
+        deathCause === 'ant'    ? 'NIPPED!' :
+        deathCause === 'queen'  ? 'FLATTENED!' :
+        deathCause === 'king'   ? 'STUNG!' :
+        deathCause === 'jester' ? 'BITTEN!' :
+        'CHOMPED!',
+        VH/2, C.red, 2
+      );
+    } else if (gameState === 'win') {
+      drawCenter('LEVEL ' + (level-1) + ' CLEAR', VH/2, C.yellow, 1);
+      const boss = level === KING_LEVEL ? 'THE KINGS NEST!'
+                 : level === QUEEN_LEVEL ? 'THE QUEENS BURROW!'
+                 : level === JESTER_LEVEL ? 'THE JESTERS HILL!' : null;
+      drawCenter(boss || 'NEXT BURROW', VH/2 + 12, boss ? C.red : C.text, 1);
+    } else if (gameState === 'bosswin') {
+      drawCenter(bossWin.title, VH/2 - 26, C.yellow, 2);
+      drawCenter(bossWin.prize, VH/2, C.red, 1);
+      drawCenter('WEAR IT FROM THE SHOP', VH/2 + 12, C.text, 1);
+      drawCenter('DEEPER BURROWS AHEAD...', VH/2 + 30, C.text, 1);
+    } else if (gameState === 'beat') {
+      drawCenter('THE JESTER FALLS', VH/2 - 34, C.yellow, 2);
+      drawCenter('SCORE ' + score, VH/2 - 8, C.text, 1);
+      drawCenter('COINS +' + runCoins, VH/2 + 4, C.coin1, 1);
+      drawCenter('SLUGBUCKS +' + runSlugs, VH/2 + 16, C.slug1, 1);
+      drawCenter('YOU WON HIS CAP', VH/2 + 34, C.jest1, 1);
+      drawCenter('WEAR IT FROM THE SHOP', VH/2 + 46, C.text, 1);
+      if ((Math.floor(performance.now()/400) % 2) === 0) {
+        drawCenter('PRESS ENTER', VH/2 + 62, C.text, 1);
+      }
+    } else if (gameState === 'over') {
+      drawCenter('GAME OVER', VH/2 - 8, C.red, 2);
+      drawCenter('SCORE ' + score, VH/2 + 16, C.text, 1);
+      drawCenter('COINS +' + runCoins, VH/2 + 28, C.coin1, 1);
+      drawCenter('SLUGBUCKS +' + runSlugs, VH/2 + 40, C.slug1, 1);
+      if ((Math.floor(performance.now()/400) % 2) === 0) {
+        drawCenter('PRESS ENTER', VH/2 + 54, C.text, 1);
+      }
+    }
+  }
+
+  // A little puff of spores expanding from where something popped
+  function drawSpores(cx, cy, t) {
+    const grow = (26 - t) * 0.7;
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const px1 = Math.round(cx + Math.cos(a) * (4 + grow));
+      const py1 = Math.round(cy + Math.sin(a) * (4 + grow));
+      rect(px1, py1, 2, 2, (i % 2) ? C.pdBel : C.red);
+    }
+  }
+
+  function drawCenter(str, y, color, scale) {
+    const w = str.length * 4 * scale;
+    drawText(str, Math.floor((VW - w) / 2), y, color, scale);
+  }
+
+  function drawMenu() {
+    // Dim the play-area dirt behind the menu
+    rect(0, HUD_H, VW, PLAY_H, 'rgba(0,0,0,0.55)');
+    // Manual rgba isn't supported by rect (uses fillStyle string) — re-apply
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, HUD_H, VW, PLAY_H);
+
+    drawCenter('EARTHWORM', 30, C.yellow, 2);
+    drawCenter('VS PRAIRIE DOGS', 52, C.text, 1);
+
+    // Purse: both currencies, side by side
+    const pw = (8 + String(coins).length * 4) + 12 + (8 + String(slugs).length * 4);
+    let pxx = Math.floor((VW - pw) / 2);
+    pxx += drawPurse(pxx, 64, 'coin', coins, C.coin1) + 12;
+    drawPurse(pxx, 64, 'slug', slugs, C.slug1);
+
+    // Draw the chosen pointer + menu items
+    menuBounds.length = 0;
+    const baseY = 78;
+    const lineH = 12;
+    for (let i = 0; i < MENU_ITEMS.length; i++) {
+      const shut = i === M_ASM && asmLocked();
+      const label = i === M_DIFF ? 'DIFFICULTY: ' + DIFF_NAMES[difficulty]
+        : shut ? 'ASM CLOSED - ' + asmLockSeconds() + 'S'
+        : MENU_ITEMS[i];
+      const w = label.length * 4;
+      const x = Math.floor((VW - w) / 2);
+      const y = baseY + i * lineH;
+      const selected = i === menuIndex;
+      drawText(label, x, y, shut ? C.red : selected ? C.yellow : C.text, 1);
+      if (selected) drawPointer(x - 12, y);
+      menuBounds.push({ x: x - 16, y: y - 4, w: w + 24, h: 11 });
+    }
+
+    // Scoring table below the menu items
+    const tableY = baseY + MENU_ITEMS.length * lineH + 2;
+    drawCenter('POINTS', tableY, C.text, 1);
+    drawScoreRow(tableY + 12, 'pd', 'PRAIRIE DOG', 200, 500);
+    drawScoreRow(tableY + 24, 'ant', 'ANT', 150, 350);
+    drawScoreRow(tableY + 36, 'squiggle', 'SQUIGGLE',  100, 250);
+    drawCenter('SQUIGGLES DROP SLUGBUCKS', tableY + 48, C.slug1, 1);
+
+    // Secret buttons, up top and clear of the touch controls
+    drawCoinButton();
+    drawWantedButton();
+
+    // Hint at bottom - the difficulty row has its own
+    if (menuIndex === M_DIFF) drawCenter('LEFT/RIGHT TO CHANGE', VH - 14, C.red, 1);
+    else drawCenter('UP DOWN: SELECT   ENTER: OK', VH - 14, C.text, 1);
+  }
+
+  function drawShop() {
+    ctx.fillStyle = 'rgba(0,0,0,0.82)';
+    ctx.fillRect(0, HUD_H, VW, PLAY_H);
+    drawCenter('HAT SHOP', 24, C.yellow, 2);
+
+    // Purse: both currencies
+    const pw = (8 + String(coins).length * 4) + 14 + (8 + String(slugs).length * 4);
+    let pxx = Math.floor((VW - pw) / 2);
+    pxx += drawPurse(pxx, 44, 'coin', coins, C.coin1) + 14;
+    drawPurse(pxx, 44, 'slug', slugs, C.slug1);
+
+    clampShopScroll();
+    shopBounds.length = 0;
+    const baseY = 58, lineH = 14;
+    for (let v = 0; v < SHOP_VISIBLE; v++) {
+      const i = shopScroll + v;
+      if (i >= SHOP_ROWS) break;
+      const y = baseY + v * lineH;
+      const sel = i === shopIndex;
+      if (i === HATS.length) {
+        const label = 'BACK';
+        const x = Math.floor((VW - label.length * 4) / 2);
+        drawText(label, x, y, sel ? C.yellow : C.text, 1);
+        if (sel) drawPointer(x - 12, y);
+        shopBounds.push({ x: x - 16, y: y - 5, w: label.length * 4 + 24, h: 13, idx: i });
+        continue;
+      }
+      const h = HATS[i];
+      drawHat(28, y - 1, h.id);
+      drawText(h.name, 44, y, sel ? C.yellow : C.text, 1);
+      if (equipped === h.id) {
+        drawText('WORN', 168, y, C.sq1, 1);
+      } else if (owned[h.id]) {
+        drawText('OWNED', 168, y, C.text, 1);
+      } else if (h.cur === 'unlock') {
+        drawText('LOCKED', 168, y, C.red, 1);
+      } else {
+        const purse = h.cur === 'slug' ? slugs : coins;
+        const ok = h.cur === 'slug' ? C.slug1 : C.coin1;
+        if (h.cur === 'slug') drawSlugBuck(168, y - 1);
+        else drawCoin(168, y - 1);
+        drawText(String(h.cost), 178, y, purse >= h.cost ? ok : C.red, 1);
+      }
+      if (sel) drawPointer(14, y);
+      shopBounds.push({ x: 12, y: y - 5, w: 216, h: 13, idx: i });
+    }
+
+    // Arrows when there is more list above or below the window
+    if (shopScroll > 0) drawScrollArrow(232, baseY - 7, true);
+    if (shopScroll + SHOP_VISIBLE < SHOP_ROWS) {
+      drawScrollArrow(232, baseY + SHOP_VISIBLE * lineH - 6, false);
+    }
+
+    // Blurb for whatever is highlighted
+    const descY = baseY + SHOP_VISIBLE * lineH + 4;
+    const sel = shopIndex < HATS.length ? HATS[shopIndex] : null;
+    const desc = !sel ? 'BACK TO THE MENU.'
+      : (sel.lockedDesc && !owned[sel.id]) ? sel.lockedDesc
+      : sel.desc;
+    drawCenter(desc, descY, C.text, 1);
+    if (shopMsgTimer > 0) drawCenter(shopMsg, descY + 10, shopMsgColor, 1);
+    drawCenter('ENTER: BUY OR WEAR', VH - 14, C.text, 1);
+  }
+
+  function drawCursorShop() {
+    ctx.fillStyle = 'rgba(0,0,0,0.82)';
+    ctx.fillRect(0, HUD_H, VW, PLAY_H);
+    drawCenter('POINTERS', 24, C.yellow, 2);
+
+    const pw = (8 + String(coins).length * 4) + 14 + (8 + String(slugs).length * 4);
+    let pxx = Math.floor((VW - pw) / 2);
+    pxx += drawPurse(pxx, 44, 'coin', coins, C.coin1) + 14;
+    drawPurse(pxx, 44, 'slug', slugs, C.slug1);
+
+    clampCursorScroll();
+    cursorBounds.length = 0;
+    const baseY = 54, lineH = 12;
+    for (let v = 0; v < CURSOR_VISIBLE; v++) {
+      const i = cursorScroll + v;
+      if (i >= CURSOR_ROWS) break;
+      const y = baseY + v * lineH;
+      const sel = i === cursorIndex;
+      if (i === CURSORS.length) {
+        const label = 'BACK';
+        const x = Math.floor((VW - label.length * 4) / 2);
+        drawText(label, x, y, sel ? C.yellow : C.text, 1);
+        if (sel) drawPointer(x - 12, y);
+        cursorBounds.push({ x: x - 16, y: y - 4, w: label.length * 4 + 24, h: 11, idx: i });
+        continue;
+      }
+      const c = CURSORS[i];
+      drawCursorArt(c.id, 30, y);
+      drawText(c.name, 44, y, sel ? C.yellow : C.text, 1);
+      if (cursorEquipped === c.id) {
+        drawText('IN USE', 168, y, C.sq1, 1);
+      } else if (cursorsOwned[c.id]) {
+        drawText('OWNED', 168, y, C.text, 1);
+      } else {
+        const purse = c.cur === 'slug' ? slugs : coins;
+        const ok = c.cur === 'slug' ? C.slug1 : C.coin1;
+        if (c.cur === 'slug') drawSlugBuck(168, y - 1);
+        else drawCoin(168, y - 1);
+        drawText(String(c.cost), 178, y, purse >= c.cost ? ok : C.red, 1);
+      }
+      // The marker shows the pointer you are looking at, so you can try before you buy
+      if (sel) drawCursorArt(c.id, 14, y);
+      cursorBounds.push({ x: 12, y: y - 4, w: 216, h: 11, idx: i });
+    }
+
+    // Little arrows when there is more list above or below the window
+    if (cursorScroll > 0) drawScrollArrow(232, baseY - 7, true);
+    if (cursorScroll + CURSOR_VISIBLE < CURSOR_ROWS) {
+      drawScrollArrow(232, baseY + CURSOR_VISIBLE * lineH - 6, false);
+    }
+
+    const descY = baseY + CURSOR_VISIBLE * lineH + 6;
+    const sel = cursorIndex < CURSORS.length ? CURSORS[cursorIndex] : null;
+    drawCenter(sel ? sel.desc : 'BACK TO THE MENU.', descY, C.text, 1);
+    if (shopMsgTimer > 0) drawCenter(shopMsg, descY + 10, shopMsgColor, 1);
+    drawCenter('ENTER: BUY OR USE', VH - 14, C.text, 1);
+  }
+
+  function drawScrollArrow(x, y, up) {
+    if (up) {
+      px(x + 2, y, C.rock1);
+      rect(x + 1, y + 1, 3, 1, C.rock1);
+      rect(x,     y + 2, 5, 1, C.rock1);
+    } else {
+      rect(x,     y,     5, 1, C.rock1);
+      rect(x + 1, y + 1, 3, 1, C.rock1);
+      px(x + 2, y + 2, C.rock1);
+    }
+  }
+
+  // Render one row of the scoring table: little sprite, name, squirt and rock totals
+  function drawScoreRow(y, type, name, squirtPts, rockPts) {
+    const labelColor = type === 'squiggle' ? C.sq1 : type === 'ant' ? C.ant1 : C.pd1;
+    // Tiny icon: 8x8-ish reduced sprite at left
+    const iconX = 36;
+    if (type === 'ant') {
+      // small ant: three beads and a pair of antennae
+      rect(iconX + 2, y - 1, 3, 2, C.antD);
+      rect(iconX + 2, y + 1, 3, 2, C.ant1);
+      rect(iconX + 1, y + 3, 5, 3, C.antD);
+      px(iconX + 1, y - 2, C.antD);
+      px(iconX + 5, y - 2, C.antD);
+      px(iconX, y + 1, C.antD);
+      px(iconX + 6, y + 1, C.antD);
+    } else if (type === 'pd') {
+      // small prairie-dog: oval body + dot eyes
+      rect(iconX,     y - 1, 7, 7, C.pd2);
+      rect(iconX + 1, y,     5, 6, C.pd1);
+      rect(iconX + 2, y + 2, 3, 3, C.pdBel);
+      px(iconX + 2, y + 1, C.pupil);
+      px(iconX + 4, y + 1, C.pupil);
+    } else {
+      // small squiggle: 4 dots in a wave
+      for (let i = 0; i < 4; i++) {
+        const wave = (i % 2) ? 1 : -1;
+        rect(iconX + i * 2, y + 2 + wave, 2, 2, C.sq2);
+        px(iconX + i * 2, y + 2 + wave, C.sq1);
+      }
+      px(iconX + 7, y + 1, C.pupil);
+    }
+    drawText(name, iconX + 12, y, labelColor, 1);
+    // Right-align point values
+    const sLabel = 'POP ' + squirtPts;
+    const rLabel = 'ROCK ' + rockPts;
+    drawText(sLabel, 140, y, C.yellow, 1);
+    drawText(rLabel, 184, y, C.rock1, 1);
+  }
+
+  function drawHowTo() {
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(0, HUD_H, VW, PLAY_H);
+    drawCenter('HOW TO PLAY', 28, C.yellow, 1);
+    const lines = [
+      ['ARROWS', 'MOVE AND DIG'],
+      ['SPACE',  'SQUIRT INK'],
+      ['',       ''],
+      ['INFLATE PRAIRIE DOGS'],
+      ['WITH INK UNTIL THEY POP'],
+      ['OR DROP ROCKS ON THEM'],
+      ['',       ''],
+      ['EVERY KILL PAYS COINS'],
+      ['SPEND THEM IN THE SHOP'],
+      ['ON HATS THAT HELP YOU'],
+      ['',       ''],
+      ['BOSSES ON BURROWS 5 10 15'],
+      ['LET GO BEFORE THEY SWING'],
+    ];
+    let y = 50;
+    for (const [a, b] of lines) {
+      if (b) {
+        drawText(a, 40, y, C.yellow, 1);
+        drawText(b, 100, y, C.text, 1);
+      } else if (a) {
+        drawCenter(a, y, C.text, 1);
+      }
+      y += 12;
+    }
+    if ((Math.floor(performance.now()/400) % 2) === 0) {
+      drawCenter('PRESS ANY KEY', VH - 18, C.red, 1);
+    }
+  }
+
+  // ====== Loop ======
+  // The touch controls only make sense in-game; parked over a menu they just
+  // cover up the keypad and the coin button.
+  const padEl = document.getElementById('pad');
+  const fireEl = document.getElementById('fire');
+  let touchUiShown = null;
+  function syncTouchUI() {
+    const show = gameState === 'play' || gameState === 'dead' ||
+                 gameState === 'win' || gameState === 'bosswin';
+    if (show === touchUiShown) return;
+    touchUiShown = show;
+    padEl.style.display = show ? '' : 'none';
+    fireEl.style.display = show ? '' : 'none';
+  }
+
+  let last = performance.now();
+  let acc = 0;
+  const STEP = 1000 / 60;
+  function frame(now) {
+    const dt = Math.min(100, now - last);
+    last = now;
+    acc += dt;
+    while (acc >= STEP) {
+      update();
+      acc -= STEP;
+    }
+    draw();
+    syncTouchUI();
+    requestAnimationFrame(frame);
+  }
+
+  // Init
+  loadProgress();
+  makeLevel(1);
+  spawnPlayer();
+  spawnPDs(1);
+  gameState = 'menu';
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
