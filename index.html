@@ -197,6 +197,10 @@
     carrot: '#fc8c20',   // pointer carrot
     candy:  '#ff9ec4',   // lollypop pink
     cone:   '#f05a10',   // traffic cone, kept clear of the carrot
+    beet1:  '#5a6a7a',   // knight beetle carapace
+    beet2:  '#2e3a46',
+    bun1:   '#e8e0d0',   // stuffed rabbit, kept clear of the teddy's honey
+    bun2:   '#a89888',
     ant1:   '#7a3a1c',   // worker ant
     ted1:   '#d8a860',   // teddy bear, kept well clear of the prairie dog browns
     ted2:   '#8a6030',
@@ -326,7 +330,8 @@
       return false;
     };
     // Boss burrows come with a proper crowd on top of whatever the boss calls up
-    const bossSpawner = levelIdx >= JESTER_LEVEL ? spawnJester
+    const bossSpawner = levelIdx >= KNIGHT_LEVEL ? spawnKnight
+                      : levelIdx === JESTER_LEVEL ? spawnJester
                       : levelIdx === QUEEN_LEVEL ? spawnQueen
                       : levelIdx === KING_LEVEL ? spawnKing : null;
     if (bossSpawner) {
@@ -351,7 +356,8 @@
   const KING_LEVEL = 5;
   const QUEEN_LEVEL = 10;
   const JESTER_LEVEL = 15;
-  const FINAL_LEVEL = JESTER_LEVEL;
+  const KNIGHT_LEVEL = 20;
+  const FINAL_LEVEL = KNIGHT_LEVEL;
   const BOSS_SIZE = 32;
   const QUEEN_SIZE = BOSS_SIZE;
   const KING_SIZE = BOSS_SIZE;
@@ -361,9 +367,23 @@
   const KING_SPAWN_GAP = 170;
   const JESTER_MAX_MINIONS = 9;
   const JESTER_SPAWN_GAP = 140;
+  const KNIGHT_MAX_MINIONS = 10;
+  const KNIGHT_SPAWN_GAP = 130;
 
   function isBoss(p) {
-    return p.type === 'queen' || p.type === 'king' || p.type === 'jester';
+    return p.type === 'queen' || p.type === 'king' ||
+           p.type === 'jester' || p.type === 'knight';
+  }
+
+  // The Knight Beetle carries his shield on the side he is facing. Ink only
+  // tells when you are round the back of him.
+  function behindKnight(b) {
+    const px1 = player.x + 8, py1 = player.y + 8;
+    const cx = entCX(b), cy = entCY(b);
+    if (b.dir === 'L') return px1 > cx;
+    if (b.dir === 'R') return px1 < cx;
+    if (b.dir === 'U') return py1 > cy;
+    return py1 < cy;
   }
 
   // Both bosses get meaner once they are down to half health.
@@ -432,6 +452,35 @@
     });
   }
 
+  // The Knight Beetle: the last one down, armoured on the front and given to
+  // charging in a straight line once he has you lined up.
+  function spawnKnight() {
+    const kc = 2, kr = 2;
+    for (let r = kr; r < kr + 2; r++) {
+      for (let c = kc; c < kc + 2; c++) carve(r, c);
+    }
+    const hp = 12 + difficulty * 2;
+    pds.push({
+      type: 'knight',
+      x: kc * TILE,
+      y: kr * TILE,
+      dir: 'D',
+      speed: 0.44 + difficulty * 0.08,
+      alive: true,
+      pumped: 0,
+      pumpDecay: 0,
+      stunned: 0,
+      thinkTimer: 0,
+      wiggle: 0,
+      hp, maxHp: hp,
+      lash: 0,
+      hurtFlash: 0,
+      spawnTimer: 130,
+      mode: 'walk',
+      phase: 150,
+    });
+  }
+
   function spawnJester() {
     const jc = 2, jr = ROWS - 4;
     for (let r = jr; r < jr + 2; r++) {
@@ -476,6 +525,69 @@
     p.x = pick.x;
     p.y = pick.y;
     carveAt(p.x, p.y, BOSS_SIZE);
+  }
+
+  // Trundles after you, then rears up and charges in a straight line until
+  // something stops him. The charge is when his back is easiest to get at.
+  function moveKnight(p) {
+    const rage = enraged(p);
+    p.spawnTimer--;
+    if (p.spawnTimer <= 0) {
+      p.spawnTimer = rage ? Math.round(KNIGHT_SPAWN_GAP * 0.6) : KNIGHT_SPAWN_GAP;
+      bossCallsForHelp(p, KNIGHT_MAX_MINIONS);
+    }
+
+    p.phase--;
+    if (p.phase <= 0) {
+      if (p.mode === 'walk')      { p.mode = 'rear';   p.phase = 34; }
+      else if (p.mode === 'rear') { p.mode = 'charge'; p.phase = rage ? 70 : 55; }
+      else                        { p.mode = 'walk';   p.phase = rage ? 110 : 170; }
+    }
+    if (p.mode === 'rear') return;        // dug in, winding up
+
+    p.thinkTimer--;
+    const ax = Math.round(p.x / TILE) * TILE;
+    const ay = Math.round(p.y / TILE) * TILE;
+    const aligned = Math.abs(p.x - ax) < 0.6 && Math.abs(p.y - ay) < 0.6;
+    // He only picks a new way while walking; a charge holds its line
+    if (p.mode === 'walk' && aligned && p.thinkTimer <= 0) {
+      p.thinkTimer = 30;
+      const dxp = (player.x + 8) - entCX(p);
+      const dyp = (player.y + 8) - entCY(p);
+      const order = Math.abs(dxp) > Math.abs(dyp)
+        ? [dxp > 0 ? 'R' : 'L', dyp > 0 ? 'D' : 'U']
+        : [dyp > 0 ? 'D' : 'U', dxp > 0 ? 'R' : 'L'];
+      const open = ['L','R','U','D'].filter(d => {
+        const mx = d === 'L' ? -1 : d === 'R' ? 1 : 0;
+        const my = d === 'U' ? -1 : d === 'D' ? 1 : 0;
+        return canOccupy(ax + mx * TILE, ay + my * TILE, BOSS_SIZE);
+      });
+      const pick = order.find(d => open.includes(d));
+      if (pick) p.dir = pick;
+      else if (open.length) p.dir = open[(Math.random() * open.length) | 0];
+    }
+
+    let dx = 0, dy = 0;
+    if (p.dir === 'L') dx = -1;
+    else if (p.dir === 'R') dx = 1;
+    else if (p.dir === 'U') dy = -1;
+    else dy = 1;
+    if (dx !== 0) p.y = ay;
+    if (dy !== 0) p.x = ax;
+
+    const sp = p.speed * (p.mode === 'charge' ? (rage ? 4.2 : 3.4) : 1);
+    const nx = p.x + dx * sp;
+    const ny = p.y + dy * sp;
+    if (canOccupy(nx, ny, BOSS_SIZE)) {
+      p.x = nx;
+      p.y = ny;
+      carveAt(p.x, p.y, BOSS_SIZE);
+    } else {
+      p.x = ax;            // back onto the grid, so he can pick a new way
+      p.y = ay;
+      p.thinkTimer = 0;
+      if (p.mode === 'charge') { p.mode = 'walk'; p.phase = 80; }   // hit a wall
+    }
   }
 
   function moveJester(p) {
@@ -863,6 +975,9 @@
     { id: 'jester',    name: 'JESTER CAP',  cost: 0,   cur: 'unlock',
       desc: 'EVERY POP PAYS DOUBLE.',
       lockedDesc: 'BEAT THE JESTER ANT TO UNLOCK.' },
+    { id: 'shell',     name: 'THE SHELL',   cost: 0,   cur: 'unlock',
+      desc: 'SHRUG OFF THREE HITS A BURROW.',
+      lockedDesc: 'BEAT THE KNIGHT BEETLE TO UNLOCK.' },
   ];
 
   // Pointers for the menus. Pure decoration - none of them change the game.
@@ -899,6 +1014,7 @@
     { id: 'cake',   name: 'CUPCAKE',      cost: 40, cur: 'coin', desc: 'ICING ON TOP.' },
     { id: 'sushi',  name: 'SUSHI',        cost: 14, cur: 'slug', desc: 'VERY FANCY POINTING.' },
     { id: 'teddy',  name: 'TEDDY BEAR',   cost: 40, cur: 'coin', desc: 'A FRIEND WHO POINTS.' },
+    { id: 'rabbit', name: 'STUFFED RABBIT',cost: 45, cur: 'coin', desc: 'FLOPPY EARS. NO HOPPING.' },
     { id: 'sun',    name: 'SUN',          cost: 55, cur: 'coin', desc: 'BRIGHT, DOWN A DARK HOLE.' },
     { id: 'moon',   name: 'MOON',         cost: 55, cur: 'coin', desc: 'FOR LATE NIGHT DIGGING.' },
     { id: 'rocket', name: 'ROCKET',      cost: 60, cur: 'coin', desc: 'POINTS AT THINGS VERY FAST.' },
@@ -923,6 +1039,9 @@
   let gadgetMsg = '';    // 'NO MINES LEFT' and the like
   let gadgetMsgTimer = 0;
   let bossGuardMsg = 0;  // reminder that rocks do nothing to a boss
+  let shieldMsg = 0;     // 'GET BEHIND HIM!' while the knight's shield is up
+  let shellLeft = 0;     // the shell is good for three knocks a burrow
+  let shellFlash = 0;
   let bossWin = { title: '', prize: '' };   // which boss the clear screen is for
 
   // Coins paid per kill. Rock crushes pay better than pops.
@@ -1344,6 +1463,7 @@
     { label: 'KING HORNET', level: KING_LEVEL,   face: 'king' },
     { label: 'QUEEN MOLE',  level: QUEEN_LEVEL,  face: 'queen' },
     { label: 'JESTER ANT',  level: JESTER_LEVEL, face: 'jester' },
+    { label: 'KNIGHT BEETLE', level: KNIGHT_LEVEL, face: 'knight' },
   ];
   const bossPickBounds = [];
   let bossPickIndex = 0;
@@ -1581,11 +1701,22 @@
     blastFlash = 0;
     gadgetMsgTimer = 0;
     bossGuardMsg = 0;
+    shieldMsg = 0;
+    shellLeft = equipped === 'shell' ? 3 : 0;
+    shellFlash = 0;
     helper = equipped === 'magic' ? makeHelper() : null;
   }
 
-  // Returns true if the hit was fatal. The knight helm shrugs off rock hits.
+  // Returns true if the hit was fatal. The knight helm shrugs off rock hits,
+  // and the beetle's shell takes three knocks of any kind per burrow.
   function hitPlayer(cause) {
+    if (equipped === 'shell' && shellLeft > 0) {
+      shellLeft--;
+      player.invuln = 110;
+      shellFlash = 50;
+      if (cause === 'squish') escapeRock();
+      return false;
+    }
     if (cause === 'squish' && equipped === 'armor') {
       player.invuln = 90;
       armorFlash = 50;
@@ -1838,9 +1969,9 @@
   }
 
   function nextLevel() {
-    if (level >= JESTER_LEVEL) {
-      if (!owned.jester) {
-        owned.jester = true;
+    if (level >= KNIGHT_LEVEL) {
+      if (!owned.shell) {
+        owned.shell = true;
         saveProgress();
       }
       gameState = 'beat';
@@ -1848,7 +1979,8 @@
       return;
     }
     const prize = level === KING_LEVEL ? 'shades'
-                : level === QUEEN_LEVEL ? 'bow' : null;
+                : level === QUEEN_LEVEL ? 'bow'
+                : level === JESTER_LEVEL ? 'jester' : null;
     if (prize) {
       if (!owned[prize]) {
         owned[prize] = true;
@@ -1856,6 +1988,8 @@
       }
       bossWin = prize === 'shades'
         ? { title: 'THE KING FALLS', prize: 'YOU TOOK HIS SHADES' }
+        : prize === 'jester'
+        ? { title: 'THE JESTER FALLS', prize: 'HIS CAP IS YOURS' }
         : { title: 'THE QUEEN FALLS', prize: 'THE BOW IS YOURS' };
       level++;
       gameState = 'bosswin';
@@ -1877,6 +2011,8 @@
     if (sporeFlash > 0) sporeFlash--;
     if (blastFlash > 0) blastFlash--;
     if (bossGuardMsg > 0) bossGuardMsg--;
+    if (shieldMsg > 0) shieldMsg--;
+    if (shellFlash > 0) shellFlash--;
     if (shopMsgTimer > 0) shopMsgTimer--;
     if (codeMsgTimer > 0) codeMsgTimer--;
     if (asmMsgTimer > 0) asmMsgTimer--;
@@ -1938,7 +2074,11 @@
       if (tgt && tgt.alive && (isBoss(tgt) || tileAt(tgt.x+8, tgt.y+8) === EMPTY)) {
         // Inflate over time.
         const fast = false;
-        if (player.squirtTimer % (fast ? 1 : 18) === 0) {
+        // His shield is on the side he faces - get round the back of him
+        if (tgt.type === 'knight' && !behindKnight(tgt)) {
+          if (shieldMsg <= 0) shieldMsg = 70;
+          tgt.pumped = 0;
+        } else if (player.squirtTimer % (fast ? 1 : 18) === 0) {
           tgt.pumped += fast ? 4 : 1;
           tgt.pumpDecay = 60;
           const popAt = equipped === 'party' ? 3 : 4;   // party hat pops them early
@@ -2252,6 +2392,7 @@
       if (p.type === 'queen') { moveQueen(p); continue; }
       if (p.type === 'king') { moveKing(p); continue; }
       if (p.type === 'jester') { moveJester(p); continue; }
+      if (p.type === 'knight') { moveKnight(p); continue; }
 
       // Decide direction
       p.thinkTimer--;
@@ -2540,6 +2681,13 @@
       rect(hx+5, hy+2, 2, 2, C.lens);
       px(hx+1, hy+2, C.wing);
       px(hx+5, hy+2, C.wing);
+    } else if (id === 'shell') {
+      rect(hx+1, hy+1, 6, 5, C.beet2);      // domed carapace
+      rect(hx+2, hy+2, 4, 4, C.beet1);
+      rect(hx+3, hy+1, 2, 5, C.beet2);      // the split down the back
+      px(hx+2, hy+3, C.steel);              // a sheen on it
+      px(hx, hy+5, C.beet2);
+      px(hx+7, hy+5, C.beet2);
     } else if (id === 'mushroom') {
       rect(hx+1, hy+4, 6, 2, C.pdBel);      // pale stalk
       rect(hx, hy+2, 8, 2, C.red);          // the cap
@@ -2777,6 +2925,70 @@
     rect(x+1,  y+1, 4, 4, C.jest1);
     rect(x+15, y+1, 4, 4, C.jest2);
     rect(x+8,  y,   4, 4, C.yellow);
+  }
+
+  // The Knight Beetle: 32x32, steel shield on whichever side he faces.
+  function drawKnight(p) {
+    const sx = p.x|0, sy = (p.y + HUD_H)|0;
+    const flash = p.hurtFlash > 0 && (p.hurtFlash % 8) < 4;
+    const body = flash ? C.text : C.beet1;
+    const dark = flash ? C.rock2 : C.beet2;
+    const puff = Math.min(3, p.pumped) * 2;
+    const rear = p.mode === 'rear' && (Math.floor(p.wiggle = (p.wiggle || 0) + 0.3) % 2) === 0;
+
+    // six legs
+    rect(sx+1,  sy+12, 5, 2, dark);
+    rect(sx+1,  sy+20, 5, 2, dark);
+    rect(sx+26, sy+12, 5, 2, dark);
+    rect(sx+26, sy+20, 5, 2, dark);
+
+    // carapace
+    rect(sx+4-puff,  sy+6-puff,  24+puff*2, 22+puff, dark);
+    rect(sx+6-puff,  sy+8-puff,  20+puff*2, 18+puff, body);
+    rect(sx+9,  sy+11, 14, 2, dark);          // the split down the shell
+    rect(sx+15, sy+8,  2, 20, dark);
+
+    // head and horns, up top
+    rect(sx+11, sy+1, 10, 7, dark);
+    rect(sx+12, sy+2, 8, 5, body);
+    rect(sx+13, sy+3, 2, 2, C.red);           // big red eyes
+    rect(sx+17, sy+3, 2, 2, C.red);
+    rect(sx+11, sy-1, 2, 3, dark);            // horns
+    rect(sx+19, sy-1, 2, 3, dark);
+
+    // The shield, on whichever side he faces. This is the whole fight, so it
+    // is deliberately the loudest thing on him.
+    const d = p.dir;
+    const lit = rear ? C.text : C.steel;
+    if (d === 'L' || d === 'R') {
+      const bx = d === 'L' ? sx - 2 : sx + 28;
+      rect(bx, sy + 3, 6, 26, C.steelD);
+      rect(bx + 1, sy + 5, 4, 22, lit);
+      rect(bx + 2, sy + 9, 2, 2, C.steelD);   // rivets
+      rect(bx + 2, sy + 15, 2, 2, C.steelD);
+      rect(bx + 2, sy + 21, 2, 2, C.steelD);
+    } else {
+      const by = d === 'U' ? sy - 2 : sy + 28;
+      rect(sx + 3, by, 26, 6, C.steelD);
+      rect(sx + 5, by + 1, 22, 4, lit);
+      rect(sx + 9,  by + 2, 2, 2, C.steelD);
+      rect(sx + 15, by + 2, 2, 2, C.steelD);
+      rect(sx + 21, by + 2, 2, 2, C.steelD);
+    }
+
+    drawBossHealth(sx, sy, p);
+  }
+
+  function drawKnightFace(x, y) {
+    rect(x+2,  y+5, 16, 14, C.beet2);
+    rect(x+4,  y+7, 12, 10, C.beet1);
+    rect(x+9,  y+7, 2, 12, C.beet2);
+    px(x+6,  y+10, C.red);
+    px(x+13, y+10, C.red);
+    rect(x+5,  y+2, 2, 3, C.beet2);           // horns
+    rect(x+13, y+2, 2, 3, C.beet2);
+    rect(x,    y+4, 2, 16, C.steelD);         // shield edge-on
+    rect(x+18, y+4, 2, 16, C.steelD);
   }
 
   // The King Hornet: 32x32, yellow and black, shades, beating wings.
@@ -3082,6 +3294,7 @@
       const w = WANTED[i];
       if (w.face === 'queen') drawQueenFace(62, y - 2);
       else if (w.face === 'king') drawKingFace(62, y - 2);
+      else if (w.face === 'knight') drawKnightFace(62, y - 2);
       else drawJesterFace(62, y - 2);
       drawText(w.label, 96, y + 4, sel ? C.yellow : C.text, 1);
       drawText('BURROW ' + w.level, 96, y + 16, C.rock1, 1);
@@ -3345,6 +3558,19 @@
     px(x + 7, y + 1, C.coin1);              // a star alongside
   }
 
+  function drawCursorRabbit(x, y) {
+    rect(x + 2, y - 1, 1, 3, C.bun2);       // long ears
+    rect(x + 5, y - 1, 1, 3, C.bun2);
+    px(x + 2, y, C.candy);                  // pink inside them
+    px(x + 5, y, C.candy);
+    rect(x + 1, y + 1, 6, 4, C.bun2);       // head
+    rect(x + 2, y + 1, 4, 3, C.bun1);
+    px(x + 2, y + 2, C.sqEye);              // eyes
+    px(x + 5, y + 2, C.sqEye);
+    px(x + 3, y + 3, C.candy);              // nose
+    rect(x + 2, y + 5, 4, 1, C.prop2);      // blue ribbon, so it is not the teddy
+  }
+
   function drawCursorTeddy(x, y) {
     rect(x, y - 1, 2, 3, C.ted2);           // big round ears, out at the sides
     rect(x + 6, y - 1, 2, 3, C.ted2);
@@ -3495,7 +3721,8 @@
     carrot: drawCursorCarrot, lolly: drawCursorLolly, cane: drawCursorCane,
     choc: drawCursorChoc, pizza: drawCursorPizza, donut: drawCursorDonut,
     icecrm: drawCursorIcecream, cookie: drawCursorCookie, sushi: drawCursorSushi,
-    teddy: drawCursorTeddy, fries: drawCursorFries, cake: drawCursorCupcake,
+    teddy: drawCursorTeddy, rabbit: drawCursorRabbit,
+    fries: drawCursorFries, cake: drawCursorCupcake,
     sun: drawCursorSun, moon: drawCursorMoon,
     rocket: drawCursorRocket, star: drawCursorStar, coin: drawCursorCoin,
     buck: drawCursorSlugBuck, slug: drawCursorSlug, crown: drawCursorCrown,
@@ -3784,7 +4011,8 @@
     // Enemies (prairie dogs + squiggles)
     for (const p of pds) {
       if (!p.alive) continue;
-      if (p.type === 'king') drawKing(p);
+      if (p.type === 'knight') drawKnight(p);
+      else if (p.type === 'king') drawKing(p);
       else if (p.type === 'jester') drawJester(p);
       else if (p.type === 'queen') drawQueen(p);
       else if (p.type === 'squiggle') drawSquiggle(p.x, p.y, p.dir, p.wiggle, p.pumped);
@@ -3827,6 +4055,12 @@
     }
     if (bossGuardMsg > 0 && gameState === 'play') {
       drawCenter('ROCKS BOUNCE OFF!', VH/2 - 52, C.rock1, 1);
+    }
+    if (shieldMsg > 0 && gameState === 'play') {
+      drawCenter('GET BEHIND HIM!', VH/2 - 52, C.steel, 1);
+    }
+    if (shellFlash > 0 && gameState === 'play') {
+      drawCenter('THE SHELL HOLDS! ' + shellLeft + ' LEFT', VH/2 - 40, C.beet1, 1);
     }
     if (gameState === 'play' && player.squirting && lashWinding(player.squirtTarget)
         && (Math.floor(performance.now()/120) % 2) === 0) {
@@ -4159,7 +4393,7 @@
       ['SPEND THEM IN THE SHOP'],
       ['ON HATS THAT HELP YOU'],
       ['',       ''],
-      ['BOSSES ON BURROWS 5 10 15'],
+      ['BOSSES ON 5 10 15 AND 20'],
       ['LET GO BEFORE THEY SWING'],
     ];
     let y = 50;
