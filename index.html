@@ -871,6 +871,7 @@
     { id: 'squig',  name: 'SQUIGGLE',    cost: 8,  cur: 'slug', desc: 'A LITTLE GREEN WIGGLE.' },
     { id: 'ant',    name: 'ANT',         cost: 30, cur: 'coin', desc: 'ONE OF THE LITTLE BITERS.' },
     { id: 'rock',   name: 'ROCK',        cost: 30, cur: 'coin', desc: 'IT DOESNT POINT. ITS A ROCK.' },
+    { id: 'digger', name: 'EXCAVATOR',    cost: 60, cur: 'coin', desc: 'IT DIGS, THE SAME AS YOU.' },
     { id: 'hand',   name: 'POINTY HAND', cost: 20, cur: 'coin', desc: 'A HAND THAT POINTS THE WAY.' },
     { id: 'arrow',  name: 'ARROW',       cost: 25, cur: 'coin', desc: 'STRAIGHT TO THE POINT.' },
     { id: 'carrot', name: 'CARROT',      cost: 40, cur: 'coin', desc: 'A SNACK THAT POINTS.' },
@@ -3108,6 +3109,18 @@
     rect(x + 4, y - 1, 4, 1, C.sq1);
   }
 
+  function drawCursorDigger(x, y) {
+    rect(x + 3, y - 1, 3, 1, C.coin2);      // boom, reaching up and over
+    px(x + 5, y, C.coin2);
+    rect(x + 5, y + 1, 3, 2, C.steelD);     // bucket on the end of it
+    rect(x + 6, y + 1, 2, 1, C.steel);
+    rect(x, y, 4, 4, C.coin2);              // cab
+    rect(x, y, 4, 3, C.coin1);
+    rect(x + 1, y + 1, 2, 1, C.lens);       // window
+    rect(x, y + 4, 6, 2, C.antD);           // tracks
+    rect(x + 1, y + 4, 4, 1, C.rock2);
+  }
+
   function drawCursorRock(x, y) {
     rect(x + 1, y - 1, 6, 1, C.rockD);      // outline, same shape as a real one
     rect(x, y, 1, 5, C.rockD);
@@ -3354,7 +3367,8 @@
   const CURSOR_ART = {
     worm: drawCursorWorm, pd: drawCursorPD, squig: drawCursorSquiggle,
     ant: drawCursorAnt, burger: drawCursorBurger,
-    rock: drawCursorRock, hand: drawCursorHand, arrow: drawCursorArrow,
+    rock: drawCursorRock, digger: drawCursorDigger,
+    hand: drawCursorHand, arrow: drawCursorArrow,
     carrot: drawCursorCarrot, lolly: drawCursorLolly, cane: drawCursorCane,
     choc: drawCursorChoc, pizza: drawCursorPizza, donut: drawCursorDonut,
     icecrm: drawCursorIcecream, cookie: drawCursorCookie, sushi: drawCursorSushi,
