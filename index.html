@@ -389,12 +389,23 @@
   // Both bosses get meaner once they are down to half health.
   function enraged(p) { return p.hp <= p.maxHp / 2; }
 
-  // Bosses do not just sit there and take it. Hold one with a squirt and he
-  // winds up, then swings at the worm on the other end of the ink.
-  const LASH_TIME = 68;        // frames you can hold a boss before he swings
-  const LASH_TIME_RAGE = 48;   // an angry boss swings much sooner
-  const LASH_WINDUP = 20;      // telegraphed frames before the swing lands
+  // Bosses do not just sit there and take it. Hold one too long and he shakes
+  // the ink off and clears out - it costs you the inflation, not a life.
+  const LASH_TIME = 68;        // frames you can hold a boss before he tears loose
+  const LASH_TIME_RAGE = 48;   // an angry boss shrugs it off much sooner
+  const LASH_WINDUP = 20;      // telegraphed frames before he slips the ink
   function lashLimit(p) { return enraged(p) ? LASH_TIME_RAGE : LASH_TIME; }
+  // He tears loose: the ink is wasted and he puts some ground between you.
+  function breakFree(b) {
+    releaseSquirt(player);
+    b.lash = 0;
+    b.pumped = 0;
+    b.pumpDecay = 0;
+    b.stunned = 0;
+    b.flee = 110;
+    breakFreeMsg = 80;
+  }
+
   function lashWinding(p) {
     return !!p && isBoss(p) && p.lash > 0 && p.lash >= lashLimit(p) - LASH_WINDUP;
   }
@@ -419,6 +430,7 @@
       wiggle: 0,
       hp, maxHp: hp,
       lash: 0,
+      flee: 0,
       hurtFlash: 0,
       spawnTimer: 120,
     });
@@ -444,6 +456,7 @@
       wiggle: 0,
       hp, maxHp: hp,
       lash: 0,
+      flee: 0,
       hurtFlash: 0,
       spawnTimer: 140,
       mode: 'hover',
@@ -474,6 +487,7 @@
       wiggle: 0,
       hp, maxHp: hp,
       lash: 0,
+      flee: 0,
       hurtFlash: 0,
       spawnTimer: 130,
       mode: 'walk',
@@ -501,6 +515,7 @@
       wiggle: 0,
       hp, maxHp: hp,
       lash: 0,
+      flee: 0,
       hurtFlash: 0,
       spawnTimer: 120,
       mode: 'walk',
@@ -552,8 +567,7 @@
     // He only picks a new way while walking; a charge holds its line
     if (p.mode === 'walk' && aligned && p.thinkTimer <= 0) {
       p.thinkTimer = 30;
-      const dxp = (player.x + 8) - entCX(p);
-      const dyp = (player.y + 8) - entCY(p);
+      const [dxp, dyp] = chaseVec(p);
       const order = Math.abs(dxp) > Math.abs(dyp)
         ? [dxp > 0 ? 'R' : 'L', dyp > 0 ? 'D' : 'U']
         : [dyp > 0 ? 'D' : 'U', dxp > 0 ? 'R' : 'L'];
@@ -622,8 +636,7 @@
     const aligned = Math.abs(p.x - ax) < 0.6 && Math.abs(p.y - ay) < 0.6;
     if (aligned && p.thinkTimer <= 0) {
       p.thinkTimer = 26;
-      const dxp = (player.x + 8) - entCX(p);
-      const dyp = (player.y + 8) - entCY(p);
+      const [dxp, dyp] = chaseVec(p);
       const order = Math.abs(dxp) > Math.abs(dyp)
         ? [dxp > 0 ? 'R' : 'L', dyp > 0 ? 'D' : 'U']
         : [dyp > 0 ? 'D' : 'U', dxp > 0 ? 'R' : 'L'];
@@ -693,8 +706,7 @@
     const aligned = Math.abs(p.x - ax) < 0.6 && Math.abs(p.y - ay) < 0.6;
     if (aligned && p.thinkTimer <= 0) {
       p.thinkTimer = 30;
-      const dxp = (player.x + 8) - (p.x + QUEEN_SIZE / 2);
-      const dyp = (player.y + 8) - (p.y + QUEEN_SIZE / 2);
+      const [dxp, dyp] = chaseVec(p);
       const order = Math.abs(dxp) > Math.abs(dyp)
         ? [dxp > 0 ? 'R' : 'L', dyp > 0 ? 'D' : 'U']
         : [dyp > 0 ? 'D' : 'U', dxp > 0 ? 'R' : 'L'];
@@ -750,8 +762,7 @@
         p.mode = 'wind';
         p.phase = rage ? 16 : 24;
       } else if (p.mode === 'wind') {
-        const dxp = (player.x + 8) - entCX(p);
-        const dyp = (player.y + 8) - entCY(p);
+        const [dxp, dyp] = chaseVec(p);
         const len = Math.hypot(dxp, dyp) || 1;
         p.vx = dxp / len;
         p.vy = dyp / len;
@@ -768,8 +779,7 @@
 
     let dx = 0, dy = 0, sp = 0;
     if (p.mode === 'hover') {
-      const dxp = (player.x + 8) - entCX(p);
-      const dyp = (player.y + 8) - entCY(p);
+      const [dxp, dyp] = chaseVec(p);
       const len = Math.hypot(dxp, dyp) || 1;
       dx = dxp / len;
       dy = dyp / len;
@@ -787,6 +797,14 @@
     if (p.mode === 'dash' && nx === p.x && ny === p.y) p.phase = 0;   // hit the wall
     p.x = nx;
     p.y = ny;
+  }
+
+  // Which way a boss steers: at the worm, or away from it while he is
+  // shaking off a mouthful of ink.
+  function chaseVec(p) {
+    const away = p.flee > 0 ? -1 : 1;
+    return [((player.x + 8) - entCX(p)) * away,
+            ((player.y + 8) - entCY(p)) * away];
   }
 
   // Centre and contact radius of any enemy, so the big one is handled too.
@@ -1040,6 +1058,7 @@
   let gadgetMsgTimer = 0;
   let bossGuardMsg = 0;  // reminder that rocks do nothing to a boss
   let shieldMsg = 0;     // 'GET BEHIND HIM!' while the knight's shield is up
+  let breakFreeMsg = 0;  // 'HE SHAKES IT OFF!' when a boss tears loose
   let shellLeft = 0;     // the shell is good for three knocks a burrow
   let shellFlash = 0;
   let bossWin = { title: '', prize: '' };   // which boss the clear screen is for
@@ -1702,6 +1721,7 @@
     gadgetMsgTimer = 0;
     bossGuardMsg = 0;
     shieldMsg = 0;
+    breakFreeMsg = 0;
     shellLeft = equipped === 'shell' ? 3 : 0;
     shellFlash = 0;
     helper = equipped === 'magic' ? makeHelper() : null;
@@ -2012,6 +2032,7 @@
     if (blastFlash > 0) blastFlash--;
     if (bossGuardMsg > 0) bossGuardMsg--;
     if (shieldMsg > 0) shieldMsg--;
+    if (breakFreeMsg > 0) breakFreeMsg--;
     if (shellFlash > 0) shellFlash--;
     if (shopMsgTimer > 0) shopMsgTimer--;
     if (codeMsgTimer > 0) codeMsgTimer--;
@@ -2063,7 +2084,7 @@
       tryStartSquirt();
     } else {
       if (player.squirting) {
-        // Releasing lets the target deflate - and a boss forget his swing
+        // Releasing lets the target deflate - and a boss lose its grip count
         releaseSquirt(player);
       }
     }
@@ -2089,17 +2110,13 @@
             return;
           }
         }
-        // Bosses hit back while you inflate them, so you cannot just stand
-        // there and pump. Let go when he rears up, then grab him again.
+        // Hold a boss too long and he tears loose, taking the swelling with
+        // him. Let go when he starts to slip, then grab him again.
         if (isBoss(tgt)) {
           tgt.lash++;
           if (tgt.lash >= lashLimit(tgt)) {
-            releaseSquirt(player);
-            tgt.lash = 0;
-            if (player.invuln <= 0) {
-              hitPlayer(tgt.type);
-              return;
-            }
+            breakFree(tgt);
+            return;
           }
         }
         // Rocks still squish while squirting
@@ -2379,6 +2396,7 @@
     for (const p of pds) {
       if (!p.alive) continue;
       if (p.hurtFlash > 0) p.hurtFlash--;
+      if (p.flee > 0) p.flee--;
       // Decay pump pressure
       if (p.pumped > 0) {
         if (p.pumpDecay > 0) p.pumpDecay--;
@@ -3061,7 +3079,7 @@
     rect(sx+1, barY-1, bw+2, 5, C.rockD);
     rect(sx+2, barY,   bw,   3, '#000000');
     rect(sx+2, barY,   fill, 3, p.hp <= p.maxHp / 2 ? C.red : C.sq1);
-    // Flashing red outline: he is rearing up to swing. Let go.
+    // Flashing red outline: he is working himself loose. Let go and re-grab.
     if (lashWinding(p) && (p.lash % 8) < 4) {
       rect(sx, sy, BOSS_SIZE, 1, C.red);
       rect(sx, sy + BOSS_SIZE - 1, BOSS_SIZE, 1, C.red);
@@ -3883,7 +3901,7 @@
     const tgt = ent.squirtTarget;
     const tx = tgt.x + 8;
     const ty = tgt.y + 8 + HUD_H;
-    // The ink turns red when the boss on the end of it is about to swing
+    // The ink turns red when the boss on the end of it is about to slip it
     ctx.fillStyle = lashWinding(tgt) ? C.red : color;
     // Draw dotted line of squirt particles
     const dx = tx - cx, dy = ty - cy;
@@ -4059,12 +4077,15 @@
     if (shieldMsg > 0 && gameState === 'play') {
       drawCenter('GET BEHIND HIM!', VH/2 - 52, C.steel, 1);
     }
+    if (breakFreeMsg > 0 && gameState === 'play') {
+      drawCenter('HE SHAKES IT OFF!', VH/2 - 52, C.yellow, 1);
+    }
     if (shellFlash > 0 && gameState === 'play') {
       drawCenter('THE SHELL HOLDS! ' + shellLeft + ' LEFT', VH/2 - 40, C.beet1, 1);
     }
     if (gameState === 'play' && player.squirting && lashWinding(player.squirtTarget)
         && (Math.floor(performance.now()/120) % 2) === 0) {
-      drawCenter('LET GO!', VH/2 - 64, C.red, 2);
+      drawCenter('HE IS SLIPPING!', VH/2 - 64, C.red, 2);
     }
 
     // Overlays
@@ -4394,7 +4415,7 @@
       ['ON HATS THAT HELP YOU'],
       ['',       ''],
       ['BOSSES ON 5 10 15 AND 20'],
-      ['LET GO BEFORE THEY SWING'],
+      ['LET GO BEFORE THEY SLIP'],
     ];
     let y = 50;
     for (const [a, b] of lines) {
