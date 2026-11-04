@@ -61,6 +61,23 @@
     user-select: none;
   }
   #fire:active { background: #e74c3c; }
+  #throw {
+    position: fixed;
+    bottom: 148px;
+    right: 44px;
+    width: 72px;
+    height: 72px;
+    background: #8b4513;
+    border: 4px solid #fff;
+    border-radius: 50%;
+    color: #fff;
+    font-family: monospace;
+    font-weight: bold;
+    font-size: 14px;
+    touch-action: none;
+    user-select: none;
+  }
+  #throw:active { background: #c87830; }
   .padbtn {
     position: absolute;
     width: 56px;
@@ -80,7 +97,7 @@
   #pL { left: 0; top: 52px; }
   #pR { left: 104px; top: 52px; }
   @media (hover: hover) and (pointer: fine) {
-    #pad, #fire { display: none; }
+    #pad, #fire, #throw { display: none; }
   }
 </style>
 </head>
@@ -93,6 +110,7 @@
   <div class="padbtn" id="pR">&gt;</div>
 </div>
 <button id="fire">SQUIRT</button>
+<button id="throw">BOW</button>
 <script>
 (() => {
   // ====== Pixel canvas setup ======
@@ -705,6 +723,7 @@
       gameState = 'menu';
     } else if (gameState === 'play') {
       if (e.key === 'Escape') gameState = 'menu';
+      else if (e.key === 'q' || e.key === 'Q') placeGadget();
     } else if (gameState !== 'play') {
       // dead / win / over -> any key returns to menu (or continues flow)
       if (gameState === 'over' || gameState === 'beat') gameState = 'menu';
@@ -728,6 +747,12 @@
   }
   bindBtn('pU','U'); bindBtn('pD','D'); bindBtn('pL','L'); bindBtn('pR','R');
   bindBtn('fire','fire');
+
+  // The throw button fires once per press rather than being held
+  const throwEl = document.getElementById('throw');
+  const doThrow = e => { e.preventDefault(); placeGadget(); };
+  throwEl.addEventListener('touchstart', doThrow, { passive: false });
+  throwEl.addEventListener('mousedown', doThrow);
 
   // Tap canvas: advance through menus / start a new run on game over
   function onCanvasTap(ev) {
@@ -825,10 +850,11 @@
     { id: 'slugcrown', name: 'SLUG CROWN',  cost: 10,  cur: 'slug', desc: 'DIG AND MOVE MUCH FASTER.' },
     { id: 'cowboy',    name: 'COWBOY HAT',  cost: 75,  cur: 'coin', desc: 'YOUR INK REACHES FURTHER.' },
     { id: 'party',     name: 'PARTY HAT',   cost: 120, cur: 'coin', desc: 'POPS LAND ONE SQUIRT SOONER.' },
-    { id: 'space',     name: 'SPACE HELMET',cost: 20,  cur: 'slug', desc: 'ONE FREE HIT EVERY BURROW.' },
+    { id: 'space',     name: 'SPACE HELMET',cost: 20,  cur: 'slug', desc: 'Q DROPS A BLACK HOLE.' },
     { id: 'mushroom',  name: 'MUSHROOM CAP',cost: 85,  cur: 'coin', desc: 'POPS PUFF OUT STUNNING SPORES.' },
+    { id: 'boomer',    name: 'BOOMERANG',   cost: 150, cur: 'coin', desc: 'Q THROWS IT. IT COMES BACK.' },
     { id: 'bow',       name: 'THE BOW',     cost: 0,   cur: 'unlock',
-      desc: 'POP MINIONS IN ONE SQUIRT.',
+      desc: 'Q PLANTS ONE. THREE A BURROW.',
       lockedDesc: 'BEAT THE QUEEN MOLE TO UNLOCK.' },
     { id: 'shades',    name: 'SUNGLASSES',  cost: 0,   cur: 'unlock',
       desc: 'ENEMIES LOSE TRACK OF YOU.',
@@ -881,8 +907,8 @@
   let slugFlash = 0;
   let armorFlash = 0;    // 'CLANG!' banner when the helm eats a rock
   let helperGoneMsg = 0; // banner when the conjured worm runs out of lives
-  let domeFlash = 0;     // 'THE DOME CRACKS!' when the space helmet saves you
-  let shieldUsed = false;// the space helmet is good for one hit per burrow
+  let gadgetMsg = '';    // 'NO MINES LEFT' and the like
+  let gadgetMsgTimer = 0;
   let bossGuardMsg = 0;  // reminder that rocks do nothing to a boss
   let bossWin = { title: '', prize: '' };   // which boss the clear screen is for
 
@@ -899,6 +925,8 @@
   // neighbours. Bosses are far too big to care.
   let sporeFlash = 0;
   let sporeAt = { x: 0, y: 0 };
+  let blastFlash = 0;                 // a mine going off
+  let blastAt = { x: 0, y: 0 };
 
   function sporeBurst(src) {
     const cx = entCX(src), cy = entCY(src);
@@ -1530,25 +1558,21 @@
     spawnPlayer();
     spawnPDs(level);
     rocks = [];
+    mines = [];            // three fresh mines every burrow
+    blackHole = null;
+    boomerang = null;
+    boomCooldown = 0;
     armorFlash = 0;
     helperGoneMsg = 0;
     sporeFlash = 0;
-    domeFlash = 0;
-    shieldUsed = false;    // a fresh dome every burrow
+    blastFlash = 0;
+    gadgetMsgTimer = 0;
     bossGuardMsg = 0;
     helper = equipped === 'magic' ? makeHelper() : null;
   }
 
-  // Returns true if the hit was fatal. The knight helm shrugs off rock hits,
-  // and the space helmet eats one hit of any kind per burrow.
+  // Returns true if the hit was fatal. The knight helm shrugs off rock hits.
   function hitPlayer(cause) {
-    if (equipped === 'space' && !shieldUsed) {
-      shieldUsed = true;
-      player.invuln = 120;
-      domeFlash = 50;
-      if (cause === 'squish') escapeRock();
-      return false;
-    }
     if (cause === 'squish' && equipped === 'armor') {
       player.invuln = 90;
       armorFlash = 50;
@@ -1558,6 +1582,216 @@
     player.alive = false;
     loseLife(cause);
     return true;
+  }
+
+  // ====== Gadgets you plant with Q ======
+  // Only one hat is worn at a time, so Q means whatever your hat means.
+  const MINE_MAX = 3;              // three mines per burrow, then you are out
+  const MINE_ARM = 20;             // frames before a fresh mine is live
+  const HOLE_PULL = TILE * 3;      // how far the black hole reaches
+  let mines = [];
+  let blackHole = null;
+
+  function placeGadget() {
+    if (gameState !== 'play' || !player.alive) return;
+    if (equipped === 'bow') plantMine();
+    else if (equipped === 'space') dropBlackHole();
+    else if (equipped === 'boomer') throwBoomerang();
+  }
+
+  // ====== The boomerang ======
+  // Flies out the way you are facing, scything through minions, then curves
+  // back to your hand. One in the air at a time.
+  const BOOM_SPEED = 3.4;
+  const BOOM_REACH = TILE * 5;     // how far out before it turns round
+  const BOOM_COOLDOWN = 24;        // breath between catching it and the next throw
+  let boomerang = null;
+  let boomCooldown = 0;
+
+  function throwBoomerang() {
+    if (boomerang || boomCooldown > 0) return;
+    const dx = player.dir === 'L' ? -1 : player.dir === 'R' ? 1 : 0;
+    const dy = player.dir === 'U' ? -1 : player.dir === 'D' ? 1 : 0;
+    boomerang = {
+      x: player.x + 4, y: player.y + 4,
+      dx, dy,
+      out: 0,                      // distance travelled on the way out
+      back: false,
+      spin: 0,
+      hit: new Set(),              // one boss can only be clipped once per throw
+    };
+  }
+
+  function updateBoomerang() {
+    if (boomCooldown > 0) boomCooldown--;
+    if (!boomerang) return;
+    const b = boomerang;
+    b.spin += 0.55;
+
+    if (!b.back) {
+      b.x += b.dx * BOOM_SPEED;
+      b.y += b.dy * BOOM_SPEED;
+      b.out += BOOM_SPEED;
+      // Turn round at full stretch, or at the edge of the burrow
+      const edge = b.x < -8 || b.y < -8 || b.x > COLS * TILE || b.y > PLAY_H;
+      if (b.out >= BOOM_REACH || edge) b.back = true;
+    } else {
+      // Home in on the worm, wherever it has got to
+      const tx = player.x + 4, ty = player.y + 4;
+      const vx = tx - b.x, vy = ty - b.y;
+      const d = Math.hypot(vx, vy) || 1;
+      b.x += (vx / d) * BOOM_SPEED;
+      b.y += (vy / d) * BOOM_SPEED;
+      if (d < 8) {                 // caught
+        boomerang = null;
+        boomCooldown = BOOM_COOLDOWN;
+        return;
+      }
+    }
+
+    // Anything it touches on the way
+    const cx = b.x + 4, cy = b.y + 4;
+    for (const e of pds) {
+      if (!e.alive) continue;
+      const reach = isBoss(e) ? 20 : 11;
+      if (Math.abs(entCX(e) - cx) >= reach || Math.abs(entCY(e) - cy) >= reach) continue;
+      if (isBoss(e)) {
+        if (b.hit.has(e)) continue;   // only one bite out of a boss per throw
+        b.hit.add(e);
+        e.hp--;
+        e.lash = 0;
+        e.hurtFlash = 36;
+        e.stunned = 30;
+        if (e.hp <= 0) {
+          e.alive = false;
+          awardKill(e, 'pop', false);
+        }
+      } else {
+        e.alive = false;
+        awardKill(e, 'pop', false);
+      }
+    }
+  }
+
+  function drawBoomerang() {
+    if (!boomerang) return;
+    const sx = boomerang.x | 0, sy = (boomerang.y + HUD_H) | 0;
+    // An L of wood tumbling through four quarter turns - the corner moves
+    // round the box, so it reads as spinning rather than as a cross.
+    const f = Math.floor(boomerang.spin) % 4;
+    const armY = (f === 0 || f === 1) ? sy : sy + 4;
+    const armX = (f === 0 || f === 3) ? sx : sx + 4;
+    rect(sx, armY, 6, 2, C.antD);
+    rect(armX, sy, 2, 6, C.antD);
+    rect(sx, armY, 5, 1, C.pdBel);
+    rect(armX, sy, 1, 5, C.pdBel);
+  }
+
+  function sayGadget(msg) {
+    gadgetMsg = msg;
+    gadgetMsgTimer = 90;
+  }
+
+  // A third of a boss's full health, rounded up, and never less than one.
+  function bossChunk(b) {
+    b.hp -= Math.max(1, Math.ceil(b.maxHp / 3));
+    b.lash = 0;
+    b.hurtFlash = 36;
+    b.stunned = 40;
+    if (b.hp <= 0) {
+      b.alive = false;
+      awardKill(b, 'pop', false);
+    }
+  }
+
+  function plantMine() {
+    if (mines.length >= MINE_MAX) { sayGadget('NO BOWS LEFT'); return; }
+    mines.push({
+      x: Math.round(player.x / TILE) * TILE,
+      y: Math.round(player.y / TILE) * TILE,
+      arm: MINE_ARM,
+      blink: 0,
+    });
+  }
+
+  function updateMines() {
+    for (let i = mines.length - 1; i >= 0; i--) {
+      const m = mines[i];
+      m.blink++;
+      if (m.arm > 0) { m.arm--; continue; }
+      const cx = m.x + 8, cy = m.y + 8;
+      for (const e of pds) {
+        if (!e.alive) continue;
+        const reach = isBoss(e) ? 20 : 11;
+        if (Math.abs(entCX(e) - cx) >= reach || Math.abs(entCY(e) - cy) >= reach) continue;
+        blastFlash = 20;
+        blastAt = { x: cx, y: cy };
+        if (isBoss(e)) bossChunk(e);
+        else { e.alive = false; awardKill(e, 'pop', false); }
+        mines.splice(i, 1);        // it goes up with whatever stood on it
+        break;
+      }
+    }
+  }
+
+  function dropBlackHole() {
+    // Only ever one - dropping a new one closes the last
+    blackHole = {
+      x: Math.round(player.x / TILE) * TILE + 8,
+      y: Math.round(player.y / TILE) * TILE + 8,
+      spin: 0,
+      hit: new Set(),              // one bite out of each boss per hole
+    };
+  }
+
+  function updateBlackHole() {
+    if (!blackHole) return;
+    const h = blackHole;
+    h.spin += 0.22;
+    for (const e of pds) {
+      if (!e.alive) continue;
+      const dx = h.x - entCX(e), dy = h.y - entCY(e);
+      const d = Math.hypot(dx, dy);
+      if (d > HOLE_PULL) continue;
+      if (isBoss(e)) {
+        // Far too big to be dragged in, but the pull still tears a chunk off
+        if (!h.hit.has(e)) { h.hit.add(e); bossChunk(e); }
+        continue;
+      }
+      e.x += (dx / (d || 1)) * 0.9;
+      e.y += (dy / (d || 1)) * 0.9;
+      e.stunned = Math.max(e.stunned, 4);
+      if (d < 7) { e.alive = false; awardKill(e, 'pop', false); }
+    }
+  }
+
+  function drawMines() {
+    for (const m of mines) {
+      // Her bow, sitting in the dirt waiting to be trodden on. It flickers
+      // while it settles, then holds steady once it is live.
+      if (m.arm > 0 && (m.blink % 8) < 4) continue;
+      const sx = m.x + 4, sy = m.y + 5 + HUD_H;
+      rect(sx,     sy + 1, 3, 5, C.red);
+      rect(sx + 5, sy + 1, 3, 5, C.red);
+      rect(sx,     sy + 2, 3, 3, C.bowL);
+      rect(sx + 5, sy + 2, 3, 3, C.bowL);
+      rect(sx + 3, sy + 1, 2, 5, C.bowD);
+    }
+  }
+
+  function drawBlackHole() {
+    if (!blackHole) return;
+    const cx = blackHole.x | 0, cy = (blackHole.y + HUD_H) | 0;
+    // A dark well with a ring of light turning round it
+    rect(cx - 6, cy - 4, 12, 8, C.magic2);
+    rect(cx - 4, cy - 6, 8, 12, C.magic2);
+    rect(cx - 4, cy - 3, 8, 6, C.tunnel);
+    rect(cx - 3, cy - 4, 6, 8, C.tunnel);
+    for (let i = 0; i < 4; i++) {
+      const a = blackHole.spin + i * (Math.PI / 2);
+      px(Math.round(cx + Math.cos(a) * 6), Math.round(cy + Math.sin(a) * 5), C.magic1);
+      px(Math.round(cx + Math.cos(a + 0.5) * 7), Math.round(cy + Math.sin(a + 0.5) * 6), C.help1);
+    }
   }
 
   // Shove the worm clear of a falling rock so the landed rock can't entomb it.
@@ -1625,9 +1859,10 @@
     if (coinFlash > 0) coinFlash--;
     if (slugFlash > 0) slugFlash--;
     if (armorFlash > 0) armorFlash--;
-    if (domeFlash > 0) domeFlash--;
+    if (gadgetMsgTimer > 0) gadgetMsgTimer--;
     if (helperGoneMsg > 0) helperGoneMsg--;
     if (sporeFlash > 0) sporeFlash--;
+    if (blastFlash > 0) blastFlash--;
     if (bossGuardMsg > 0) bossGuardMsg--;
     if (shopMsgTimer > 0) shopMsgTimer--;
     if (codeMsgTimer > 0) codeMsgTimer--;
@@ -1644,6 +1879,9 @@
     }
     if (gameState === 'play') {
       updatePlayer();
+      updateMines();
+      updateBlackHole();
+      updateBoomerang();
       updateHelper();
       updatePDs();
       updateRocks();
@@ -1685,9 +1923,8 @@
       player.squirtTimer++;
       const tgt = player.squirtTarget;
       if (tgt && tgt.alive && (isBoss(tgt) || tileAt(tgt.x+8, tgt.y+8) === EMPTY)) {
-        // Inflate over time - the bow does it in one go, but a boss is far
-        // too big for that and has to be pumped up the slow way.
-        const fast = equipped === 'bow' && !isBoss(tgt);
+        // Inflate over time.
+        const fast = false;
         if (player.squirtTimer % (fast ? 1 : 18) === 0) {
           tgt.pumped += fast ? 4 : 1;
           tgt.pumpDecay = 60;
@@ -2064,6 +2301,10 @@
           p.thinkTimer = 0;
         }
       } else {
+        // Same snap as the bump above: at the burrow wall it would otherwise
+        // sit off-grid and never re-think. The black hole can drag it here.
+        p.x = ax;
+        p.y = ay;
         p.thinkTimer = 0;
       }
     }
@@ -2266,6 +2507,11 @@
       rect(hx,   hy+2, 3, 3, C.bowL);
       rect(hx+5, hy+2, 3, 3, C.bowL);
       rect(hx+3, hy+1, 2, 5, C.bowD);
+    } else if (id === 'boomer') {
+      rect(hx+1, hy+1, 6, 2, C.antD);       // a bent arm of pale wood
+      rect(hx+1, hy+1, 2, 5, C.antD);
+      rect(hx+1, hy+1, 5, 1, C.pdBel);
+      rect(hx+1, hy+1, 1, 4, C.pdBel);
     } else if (id === 'jester') {
       rect(hx+1, hy+3, 6, 3, C.jest1);
       rect(hx+4, hy+3, 3, 3, C.jest2);
@@ -3392,6 +3638,8 @@
         else if (t === ROCK) drawRockTile(c, r);
       }
     }
+    drawBlackHole();
+    drawMines();
     // Falling rocks
     for (const rk of rocks) {
       drawRockAt(rk.x, rk.y + HUD_H);
@@ -3406,6 +3654,7 @@
       else if (p.type === 'ant') drawAnt(p.x, p.y, p.pumped);
       else drawPD(p.x, p.y, p.dir, p.pumped);
     }
+    drawBoomerang();
     // Conjured helper worm
     if (helper) {
       if (helper.invuln <= 0 || (helper.invuln % 6) < 3) {
@@ -3427,14 +3676,17 @@
     if (armorFlash > 0 && gameState === 'play') {
       drawCenter('CLANG!', VH/2 - 40, C.steel, 2);
     }
-    if (domeFlash > 0 && gameState === 'play') {
-      drawCenter('THE DOME CRACKS!', VH/2 - 40, C.wing, 1);
+    if (gadgetMsgTimer > 0 && gameState === 'play') {
+      drawCenter(gadgetMsg, VH/2 - 40, C.red, 1);
     }
     if (helperGoneMsg > 0 && gameState === 'play') {
       drawCenter('YOUR HELPER IS GONE!', VH/2 - 28, C.help1, 1);
     }
     if (sporeFlash > 0 && gameState === 'play') {
       drawSpores(sporeAt.x, sporeAt.y + HUD_H, sporeFlash);
+    }
+    if (blastFlash > 0 && gameState === 'play') {
+      drawBlast(blastAt.x, blastAt.y + HUD_H, blastFlash);
     }
     if (bossGuardMsg > 0 && gameState === 'play') {
       drawCenter('ROCKS BOUNCE OFF!', VH/2 - 52, C.rock1, 1);
@@ -3501,6 +3753,17 @@
       if ((Math.floor(performance.now()/400) % 2) === 0) {
         drawCenter('PRESS ENTER', VH/2 + 54, C.text, 1);
       }
+    }
+  }
+
+  // The flash of a mine going off
+  function drawBlast(cx, cy, t) {
+    const grow = (20 - t) * 1.1;
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2;
+      const bx = Math.round(cx + Math.cos(a) * (3 + grow));
+      const by = Math.round(cy + Math.sin(a) * (3 + grow));
+      rect(bx, by, 2, 2, (i % 2) ? C.coin1 : C.red);
     }
   }
 
@@ -3786,10 +4049,16 @@
   function syncTouchUI() {
     const show = gameState === 'play' || gameState === 'dead' ||
                  gameState === 'win' || gameState === 'bosswin';
-    if (show === touchUiShown) return;
-    touchUiShown = show;
+    const key = show + '|' + equipped;
+    if (key === touchUiShown) return;
+    touchUiShown = key;
     padEl.style.display = show ? '' : 'none';
     fireEl.style.display = show ? '' : 'none';
+    // The place button only means anything while a Q hat is worn
+    const gadget = equipped === 'bow' || equipped === 'space' || equipped === 'boomer';
+    throwEl.style.display = (show && gadget) ? '' : 'none';
+    throwEl.textContent = equipped === 'space' ? 'HOLE'
+                        : equipped === 'boomer' ? 'THROW' : 'BOW';
   }
 
   let last = performance.now();
