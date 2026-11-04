@@ -196,6 +196,7 @@
     red:    '#fc3030',
     carrot: '#fc8c20',   // pointer carrot
     candy:  '#ff9ec4',   // lollypop pink
+    cone:   '#f05a10',   // traffic cone, kept clear of the carrot
     ant1:   '#7a3a1c',   // worker ant
     ted1:   '#d8a860',   // teddy bear, kept well clear of the prairie dog browns
     ted2:   '#8a6030',
@@ -870,10 +871,21 @@
     { id: 'pd',     name: 'PRAIRIE DOG', cost: 35, cur: 'coin', desc: 'THE ENEMY, WORKING FOR YOU.' },
     { id: 'squig',  name: 'SQUIGGLE',    cost: 8,  cur: 'slug', desc: 'A LITTLE GREEN WIGGLE.' },
     { id: 'ant',    name: 'ANT',         cost: 30, cur: 'coin', desc: 'ONE OF THE LITTLE BITERS.' },
+    { id: 'ink',    name: 'INK SPLAT',    cost: 25, cur: 'coin', desc: 'YOUR OWN INK, SPLATTED.' },
     { id: 'rock',   name: 'ROCK',        cost: 30, cur: 'coin', desc: 'IT DOESNT POINT. ITS A ROCK.' },
     { id: 'digger', name: 'EXCAVATOR',    cost: 60, cur: 'coin', desc: 'IT DIGS, THE SAME AS YOU.' },
+    { id: 'shovel', name: 'SHOVEL',      cost: 35, cur: 'coin', desc: 'THE HONEST WAY TO DIG.' },
+    { id: 'pick',   name: 'PICKAXE',     cost: 40, cur: 'coin', desc: 'FOR WHEN THE DIRT FIGHTS BACK.' },
+    { id: 'tnt',    name: 'DYNAMITE',    cost: 55, cur: 'coin', desc: 'POINT, THEN STAND WELL BACK.' },
+    { id: 'lamp',   name: 'LANTERN',     cost: 45, cur: 'coin', desc: 'LIGHT DOWN A DARK BURROW.' },
+    { id: 'hardhat',name: 'HARD HAT',    cost: 40, cur: 'coin', desc: 'SAFETY FIRST DOWN HERE.' },
+    { id: 'cone',   name: 'TRAFFIC CONE',cost: 30, cur: 'coin', desc: 'MIND HOW YOU GO.' },
+    { id: 'barrow', name: 'WHEELBARROW', cost: 50, cur: 'coin', desc: 'FOR CARTING THE DIRT OUT.' },
     { id: 'hand',   name: 'POINTY HAND', cost: 20, cur: 'coin', desc: 'A HAND THAT POINTS THE WAY.' },
     { id: 'arrow',  name: 'ARROW',       cost: 25, cur: 'coin', desc: 'STRAIGHT TO THE POINT.' },
+    { id: 'mouse',  name: 'MOUSE',       cost: 65, cur: 'coin', desc: 'A POINTER SHAPED LIKE A POINTER.' },
+    { id: 'glass',  name: 'HOURGLASS',   cost: 50, cur: 'coin', desc: 'PLEASE WAIT. FOREVER.' },
+    { id: 'ibeam',  name: 'TEXT CURSOR', cost: 70, cur: 'coin', desc: 'THE DULLEST ONE. PRICED TO MATCH.' },
     { id: 'carrot', name: 'CARROT',      cost: 40, cur: 'coin', desc: 'A SNACK THAT POINTS.' },
     { id: 'lolly',  name: 'LOLLYPOP',    cost: 35, cur: 'coin', desc: 'STICKY, BUT IT POINTS.' },
     { id: 'cane',   name: 'CANDY CANE',  cost: 40, cur: 'coin', desc: 'MINTY AND STRIPED.' },
@@ -3109,6 +3121,113 @@
     rect(x + 4, y - 1, 4, 1, C.sq1);
   }
 
+  function drawCursorInk(x, y) {
+    rect(x + 1, y, 5, 3, C.squirt);         // the blot
+    rect(x + 2, y + 2, 4, 2, C.squirt);
+    rect(x, y + 1, 7, 1, C.squirt);
+    px(x + 3, y + 1, C.help1);              // highlight
+    px(x + 2, y - 1, C.squirt);             // droplets thrown off
+    px(x + 5, y - 1, C.help2);
+    px(x + 7, y + 1, C.squirt);
+    px(x + 1, y + 4, C.help2);
+    px(x + 4, y + 4, C.squirt);
+  }
+
+  function drawCursorShovel(x, y) {
+    rect(x + 1, y - 1, 3, 1, C.mole2);      // T-grip
+    rect(x + 2, y, 1, 3, C.mole2);          // shaft
+    rect(x, y + 3, 6, 2, C.steelD);         // blade
+    rect(x + 1, y + 3, 4, 1, C.steel);
+    rect(x + 1, y + 5, 4, 1, C.steelD);     // tapering to the edge
+  }
+
+  function drawCursorPick(x, y) {
+    rect(x + 1, y, 6, 1, C.steelD);         // head
+    rect(x, y + 1, 8, 1, C.steel);
+    px(x, y + 2, C.steelD);                 // the two points
+    px(x + 7, y + 2, C.steelD);
+    rect(x + 3, y + 2, 2, 4, C.mole2);      // handle
+    px(x + 3, y + 2, C.coin2);              // collar
+  }
+
+  function drawCursorDynamite(x, y) {
+    px(x + 6, y - 1, C.coin1);              // spark
+    px(x + 5, y, C.coin1);
+    px(x + 4, y, C.pdBel);                  // fuse
+    rect(x + 1, y + 1, 4, 5, C.bowD);       // the stick
+    rect(x + 2, y + 1, 2, 5, C.red);
+    rect(x + 1, y + 2, 4, 1, C.pdBel);      // label bands
+    rect(x + 1, y + 4, 4, 1, C.pdBel);
+  }
+
+  function drawCursorLantern(x, y) {
+    rect(x + 2, y - 1, 3, 1, C.steelD);     // handle
+    px(x + 1, y, C.steelD);
+    px(x + 5, y, C.steelD);
+    rect(x + 1, y + 1, 5, 1, C.steelD);     // cap
+    rect(x + 1, y + 2, 5, 3, C.coin1);      // the light
+    rect(x + 2, y + 2, 3, 2, C.text);
+    rect(x + 1, y + 5, 5, 1, C.steelD);     // base
+  }
+
+  function drawCursorHardHat(x, y) {
+    rect(x + 2, y, 4, 1, C.coin1);          // crown
+    rect(x + 1, y + 1, 6, 2, C.coin1);
+    rect(x + 3, y, 2, 3, C.coin2);          // ridge down the middle
+    rect(x, y + 3, 8, 2, C.coin2);          // brim
+    rect(x, y + 3, 8, 1, C.coin1);
+  }
+
+  function drawCursorCone(x, y) {
+    rect(x + 3, y - 1, 2, 2, C.cone);       // tip
+    rect(x + 2, y + 1, 4, 1, C.text);       // reflective bands
+    rect(x + 2, y + 2, 4, 1, C.cone);
+    rect(x + 1, y + 3, 6, 1, C.text);
+    rect(x + 1, y + 4, 6, 1, C.cone);
+    rect(x, y + 5, 8, 1, C.cone);           // base
+  }
+
+  function drawCursorBarrow(x, y) {
+    rect(x + 2, y, 6, 1, C.rock1);          // rim of the tub
+    rect(x + 2, y + 1, 5, 2, C.rock2);
+    rect(x + 3, y + 1, 3, 1, C.rock1);
+    rect(x + 6, y + 2, 2, 1, C.mole2);      // handle
+    rect(x + 1, y + 3, 5, 1, C.steelD);     // frame
+    rect(x, y + 3, 3, 3, C.antD);           // wheel
+    px(x + 1, y + 4, C.rock2);              // hub
+  }
+
+  function drawCursorMouse(x, y) {
+    px(x + 4, y - 1, C.rock2);              // cord
+    rect(x + 2, y, 4, 1, C.rock1);          // body
+    rect(x + 1, y + 1, 6, 4, C.rock1);
+    rect(x + 2, y + 5, 4, 1, C.rock2);
+    rect(x + 3, y, 1, 3, C.rockD);          // split between the buttons
+    rect(x + 1, y + 2, 6, 1, C.rock2);      // where the buttons end
+  }
+
+  function drawCursorHourglass(x, y) {
+    rect(x + 1, y - 1, 6, 1, C.pd2);        // caps
+    rect(x + 1, y + 5, 6, 1, C.pd2);
+    px(x + 1, y, C.wing);                   // glass
+    px(x + 6, y, C.wing);
+    px(x + 1, y + 4, C.wing);
+    px(x + 6, y + 4, C.wing);
+    rect(x + 2, y, 4, 1, C.coin1);          // sand still up top
+    rect(x + 3, y + 1, 2, 1, C.coin1);
+    px(x + 4, y + 2, C.coin1);              // the trickle
+    rect(x + 3, y + 3, 2, 1, C.coin2);      // and the pile below
+    rect(x + 2, y + 4, 4, 1, C.coin1);
+  }
+
+  function drawCursorIBeam(x, y) {
+    rect(x + 2, y - 1, 4, 1, C.text);       // serifs
+    rect(x + 3, y, 2, 5, C.text);           // stem
+    rect(x + 2, y + 5, 4, 1, C.text);
+    px(x + 2, y, C.rock2);
+    px(x + 5, y, C.rock2);
+  }
+
   function drawCursorDigger(x, y) {
     rect(x + 3, y - 1, 3, 1, C.coin2);      // boom, reaching up and over
     px(x + 5, y, C.coin2);
@@ -3367,8 +3486,12 @@
   const CURSOR_ART = {
     worm: drawCursorWorm, pd: drawCursorPD, squig: drawCursorSquiggle,
     ant: drawCursorAnt, burger: drawCursorBurger,
-    rock: drawCursorRock, digger: drawCursorDigger,
+    ink: drawCursorInk, rock: drawCursorRock, digger: drawCursorDigger,
+    shovel: drawCursorShovel, pick: drawCursorPick, tnt: drawCursorDynamite,
+    lamp: drawCursorLantern, hardhat: drawCursorHardHat, cone: drawCursorCone,
+    barrow: drawCursorBarrow,
     hand: drawCursorHand, arrow: drawCursorArrow,
+    mouse: drawCursorMouse, glass: drawCursorHourglass, ibeam: drawCursorIBeam,
     carrot: drawCursorCarrot, lolly: drawCursorLolly, cane: drawCursorCane,
     choc: drawCursorChoc, pizza: drawCursorPizza, donut: drawCursorDonut,
     icecrm: drawCursorIcecream, cookie: drawCursorCookie, sushi: drawCursorSushi,
