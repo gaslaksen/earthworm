@@ -389,12 +389,18 @@
   // Both bosses get meaner once they are down to half health.
   function enraged(p) { return p.hp <= p.maxHp / 2; }
 
+  const PUMP_EVERY = 18;   // frames of ink per notch of swelling
+
   // Bosses do not just sit there and take it. Hold one too long and he shakes
   // the ink off and clears out - it costs you the inflation, not a life.
-  const LASH_TIME = 68;        // frames you can hold a boss before he tears loose
-  const LASH_TIME_RAGE = 48;   // an angry boss shrugs it off much sooner
+  //
+  // He stays stuck in the ink for a second and a half. That has to be longer
+  // than a full inflation takes (PUMP_EVERY * popAt = 72 frames), or he tears
+  // loose a few frames before every hit lands and nothing can ever hurt him.
+  // An angry boss does not slip out sooner - he runs further once he does.
+  const LASH_TIME = 90;        // 1.5s at 60fps: how long the ink holds him
   const LASH_WINDUP = 20;      // telegraphed frames before he slips the ink
-  function lashLimit(p) { return enraged(p) ? LASH_TIME_RAGE : LASH_TIME; }
+  function lashLimit(p) { return LASH_TIME; }
   // He tears loose: the ink is wasted and he puts some ground between you.
   function breakFree(b) {
     releaseSquirt(player);
@@ -402,7 +408,7 @@
     b.pumped = 0;
     b.pumpDecay = 0;
     b.stunned = 0;
-    b.flee = 110;
+    b.flee = enraged(b) ? 150 : 110;
     breakFreeMsg = 80;
   }
 
@@ -468,7 +474,9 @@
   // The Knight Beetle: the last one down, armoured on the front and given to
   // charging in a straight line once he has you lined up.
   function spawnKnight() {
-    const kc = 2, kr = 2;
+    // Far corner from the worm, who always starts at the top left - put him
+    // at 2,2 and the fight opens with him already on top of you.
+    const kc = COLS - 4, kr = ROWS - 4;
     for (let r = kr; r < kr + 2; r++) {
       for (let c = kc; c < kc + 2; c++) carve(r, c);
     }
@@ -477,7 +485,7 @@
       type: 'knight',
       x: kc * TILE,
       y: kr * TILE,
-      dir: 'D',
+      dir: 'L',
       speed: 0.44 + difficulty * 0.08,
       alive: true,
       pumped: 0,
@@ -2099,7 +2107,7 @@
         if (tgt.type === 'knight' && !behindKnight(tgt)) {
           if (shieldMsg <= 0) shieldMsg = 70;
           tgt.pumped = 0;
-        } else if (player.squirtTimer % (fast ? 1 : 18) === 0) {
+        } else if (player.squirtTimer % (fast ? 1 : PUMP_EVERY) === 0) {
           tgt.pumped += fast ? 4 : 1;
           tgt.pumpDecay = 60;
           const popAt = equipped === 'party' ? 3 : 4;   // party hat pops them early
