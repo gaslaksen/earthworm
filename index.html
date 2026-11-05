@@ -274,6 +274,9 @@
   // Prairie dogs
   let pds = [];
 
+  const WORM_SPEED = 1.5;        // the worm's normal pace
+  const WORM_SPEED_CROWN = 2.1;  // ...and wearing the slug crown
+
   function spawnPlayer() {
     player.x = TILE;       // start one tile in so up/left aren't blocked by boundary
     player.y = TILE;
@@ -284,14 +287,22 @@
     player.squirtTimer = 0;
     player.squirtTarget = null;
     player.bodyTrail = [];
-    player.speed = equipped === 'slugcrown' ? 2.1 : 1.5;
+    player.speed = equipped === 'slugcrown' ? WORM_SPEED_CROWN : WORM_SPEED;
   }
 
+  // Minions get quicker the deeper you go, but that climb has to stop. It ran
+  // straight off levelIdx with no ceiling, so the Knight's burrow - number 20 -
+  // was spawning ants at 1.55 against the worm's 1.5. Nothing you could run
+  // from. The ramp now flattens out well before the last fight, and an ant is
+  // held below the worm's own pace whatever the burrow or the difficulty.
+  const SPEED_RAMP_CAP = 12;              // burrow where minions stop speeding up
+  const ANT_MAX = WORM_SPEED * 0.8;       // 1.2: an ant never outruns you
   function minionSpeed(type, levelIdx) {
     const diffSpd = [-0.2, 0, 0.15][difficulty];
-    const base = 0.4 + Math.random() * 0.15 + levelIdx * 0.03 + diffSpd;
+    const deep = Math.min(SPEED_RAMP_CAP, levelIdx);
+    const base = 0.4 + Math.random() * 0.15 + deep * 0.03 + diffSpd;
     if (type === 'pd')  return Math.max(0.2, base);
-    if (type === 'ant') return Math.max(0.25, base * 1.35);   // ants scurry
+    if (type === 'ant') return Math.min(ANT_MAX, Math.max(0.25, base * 1.35));   // ants scurry
     return Math.max(0.15, base * 0.6);                        // squiggles dawdle
   }
 
