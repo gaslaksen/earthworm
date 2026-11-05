@@ -233,14 +233,16 @@
     }
     carve(2, 0); carve(2, 1);
     // A couple of horizontal scratches
-    for (let i = 0; i < 3 + levelIdx; i++) {
+    // Both of these used to run straight off levelIdx. At burrow 100 that is
+    // 103 scratches and 104 rocks in a 16x13 grid - no burrow left to dig.
+    for (let i = 0; i < 3 + Math.min(levelIdx, 20); i++) {
       const r = 2 + ((Math.random() * (ROWS - 3)) | 0);
       const c0 = (Math.random() * (COLS - 4)) | 0;
       const len = 2 + ((Math.random() * 4) | 0);
       for (let k = 0; k < len; k++) carve(r, c0 + k);
     }
     // Place rocks
-    const nRocks = 4 + levelIdx;
+    const nRocks = 4 + Math.min(levelIdx, 20);
     let placed = 0, tries = 0;
     while (placed < nRocks && tries < 200) {
       tries++;
@@ -345,12 +347,9 @@
     const nAnt = levelIdx < 2 ? 0 : Math.min(3, Math.floor(levelIdx / 2));
     const spawn = (type) => spawnMinion(type, levelIdx);
     // Boss burrows come with a proper crowd on top of whatever the boss calls up
-    const bossSpawner = levelIdx >= KNIGHT_LEVEL ? spawnKnight
-                      : levelIdx === JESTER_LEVEL ? spawnJester
-                      : levelIdx === QUEEN_LEVEL ? spawnQueen
-                      : levelIdx === KING_LEVEL ? spawnKing : null;
-    if (bossSpawner) {
-      bossSpawner();
+    const bossType = bossAt(levelIdx);
+    if (bossType) {
+      BOSS_SPAWNERS[bossType]();
       spawn('pd');
       spawn('pd');
       spawn('pd');
@@ -369,11 +368,30 @@
   // ====== The Queen Mole ======
   // Twice the size of everything else, soaks several hits, and keeps calling
   // up prairie dogs and squiggles until she goes down.
+  // The four of them take turns, one on every fifth burrow, over and over
+  // until the hundredth. The first four burrows they turn up on are still
+  // theirs alone - that is where their hats come from.
   const KING_LEVEL = 5;
   const QUEEN_LEVEL = 10;
   const JESTER_LEVEL = 15;
   const KNIGHT_LEVEL = 20;
-  const FINAL_LEVEL = KNIGHT_LEVEL;
+  const BOSS_GAP = 5;
+  const FINAL_LEVEL = 100;
+  const BOSS_ORDER = ['king', 'queen', 'jester', 'knight'];
+  const BOSS_FALLS = { king: 'THE KING FALLS', queen: 'THE QUEEN FALLS',
+                       jester: 'THE JESTER FALLS', knight: 'THE KNIGHT FALLS' };
+  const BOSS_PRIZE = { shades: 'YOU TOOK HIS SHADES', bow: 'THE BOW IS YOURS',
+                       jester: 'HIS CAP IS YOURS', shell: 'YOU WON HIS SHELL' };
+  const BOSS_LAIR = { king: 'THE KINGS NEST!', queen: 'THE QUEENS BURROW!',
+                      jester: 'THE JESTERS HILL!', knight: 'THE KNIGHTS KEEP!' };
+
+  function isBossLevel(l) { return l % BOSS_GAP === 0 && l <= FINAL_LEVEL; }
+  function bossAt(l) {
+    return isBossLevel(l) ? BOSS_ORDER[(l / BOSS_GAP - 1) % BOSS_ORDER.length] : null;
+  }
+  // How many times round the four you have been. Each lap they are tougher,
+  // or burrow 85 would be no harder than burrow 5.
+  function bossTier(l) { return Math.floor((l - 1) / (BOSS_GAP * BOSS_ORDER.length)); }
   const BOSS_SIZE = 32;
   const QUEEN_SIZE = BOSS_SIZE;
   const KING_SIZE = BOSS_SIZE;
@@ -432,12 +450,17 @@
     return !!p && isBoss(p) && p.lash > 0 && p.lash >= lashLimit(p) - LASH_WINDUP;
   }
 
+  const BOSS_SPAWNERS = {
+    king: () => spawnKing(), queen: () => spawnQueen(),
+    jester: () => spawnJester(), knight: () => spawnKnight(),
+  };
+
   function spawnQueen() {
     const qc = COLS - 4, qr = ROWS - 4;
     for (let r = qr; r < qr + 2; r++) {
       for (let c = qc; c < qc + 2; c++) carve(r, c);
     }
-    const hp = 8 + difficulty * 2;
+    const hp = 8 + difficulty * 2 + bossTier(level) * 2;
     pds.push({
       type: 'queen',
       x: qc * TILE,
@@ -463,7 +486,7 @@
     for (let r = kr; r < kr + 2; r++) {
       for (let c = kc; c < kc + 2; c++) carve(r, c);
     }
-    const hp = 6 + difficulty;
+    const hp = 6 + difficulty + bossTier(level) * 2;
     pds.push({
       type: 'king',
       x: kc * TILE,
@@ -496,7 +519,7 @@
     for (let r = kr; r < kr + 2; r++) {
       for (let c = kc; c < kc + 2; c++) carve(r, c);
     }
-    const hp = 12 + difficulty * 2;
+    const hp = 12 + difficulty * 2 + bossTier(level) * 2;
     pds.push({
       type: 'knight',
       x: kc * TILE,
@@ -524,7 +547,7 @@
     for (let r = jr; r < jr + 2; r++) {
       for (let c = jc; c < jc + 2; c++) carve(r, c);
     }
-    const hp = 10 + difficulty * 2;
+    const hp = 10 + difficulty * 2 + bossTier(level) * 2;
     pds.push({
       type: 'jester',
       x: jc * TILE,
@@ -874,6 +897,8 @@
       handleAsmKey(e.key);
     } else if (gameState === 'bosspick') {
       handleBossPickKey(e.key);
+    } else if (gameState === 'twistpick') {
+      handleTwistPickKey(e.key);
     } else if (gameState === 'code' || gameState === 'cheat') {
       handleCodeKey(e.key);
     } else if (gameState === 'howto') {
@@ -912,6 +937,75 @@
   throwEl.addEventListener('touchstart', doThrow, { passive: false });
   throwEl.addEventListener('mousedown', doThrow);
 
+  // ====== Working a long list without a keyboard ======
+  // Only the three scrolling lists do this. Everywhere else still acts the
+  // moment you touch it, so the keypad and the slug machine are unchanged.
+  const LIST_SCREENS = { shop: 1, cursors: 1, chal: 1 };
+  const scrollUpBounds = { x: 0, y: 0, w: 0, h: 0 };
+  const scrollDownBounds = { x: 0, y: 0, w: 0, h: 0 };
+  const DRAG_STEP = 12;   // pixels of finger travel per row
+  const DRAG_SLOP = 6;    // ...before it counts as a drag rather than a tap
+  let drag = null;
+
+  function clearScrollBtns() { scrollUpBounds.w = 0; scrollDownBounds.w = 0; }
+  function setScrollBtn(b, x, y) { b.x = x - 6; b.y = y - 8; b.w = 24; b.h = 20; }
+  function hitBox(b, x, y) {
+    return b.w > 0 && x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+  }
+  function clientXY(ev) {
+    const t = ev.touches && ev.touches[0];
+    return { clientX: t ? t.clientX : ev.clientX, clientY: t ? t.clientY : ev.clientY };
+  }
+
+  function listVisible() {
+    return gameState === 'shop' ? SHOP_VISIBLE
+         : gameState === 'cursors' ? CURSOR_VISIBLE : CHAL_VISIBLE;
+  }
+
+  // Move the highlight, which drags the window along behind it - the same
+  // thing the arrow keys do, so there is only one scrolling rule to keep.
+  function listStep(delta) {
+    if (gameState === 'shop') {
+      shopIndex = Math.max(0, Math.min(SHOP_ROWS - 1, shopIndex + delta));
+      clampShopScroll();
+    } else if (gameState === 'cursors') {
+      cursorIndex = Math.max(0, Math.min(CURSOR_ROWS - 1, cursorIndex + delta));
+      clampCursorScroll();
+    } else if (gameState === 'chal') {
+      chalIndex = Math.max(0, Math.min(CHAL_ROWS - 1, chalIndex + delta));
+      clampChalScroll();
+    }
+  }
+
+  function pointerDown(ev) {
+    if (!LIST_SCREENS[gameState]) { onCanvasTap(ev); return; }
+    const [px1, py1] = canvasPoint(ev);
+    if (hitBox(scrollUpBounds, px1, py1)) { listStep(-(listVisible() - 1)); return; }
+    if (hitBox(scrollDownBounds, px1, py1)) { listStep(listVisible() - 1); return; }
+    drag = { pt: clientXY(ev), anchor: py1, last: py1, moved: 0 };
+  }
+
+  function pointerMove(ev) {
+    if (!drag) return;
+    const [, py1] = canvasPoint(ev);
+    drag.moved += Math.abs(py1 - drag.last);
+    drag.last = py1;
+    let d = drag.anchor - py1;
+    while (Math.abs(d) >= DRAG_STEP) {
+      const step = d > 0 ? 1 : -1;
+      listStep(step);
+      drag.anchor -= step * DRAG_STEP;
+      d = drag.anchor - py1;
+    }
+  }
+
+  // A touch that never really moved was a tap after all.
+  function pointerUp() {
+    const d = drag;
+    drag = null;
+    if (d && d.moved < DRAG_SLOP) onCanvasTap(d.pt);
+  }
+
   // Tap canvas: advance through menus / start a new run on game over
   function onCanvasTap(ev) {
     if (gameState === 'menu') {
@@ -926,6 +1020,8 @@
       handleAsmTap(ev);
     } else if (gameState === 'bosspick') {
       handleBossPickTap(ev);
+    } else if (gameState === 'twistpick') {
+      handleTwistPickTap(ev);
     } else if (gameState === 'play') {
       const [mx, my] = canvasPoint(ev);
       const eb = eventBtnBounds;
@@ -941,8 +1037,18 @@
       gameState = 'menu';
     }
   }
-  canvas.addEventListener('touchstart', e => { e.preventDefault(); onCanvasTap(e); }, { passive: false });
-  canvas.addEventListener('mousedown', e => { e.preventDefault(); onCanvasTap(e); });
+  canvas.addEventListener('touchstart', e => { e.preventDefault(); pointerDown(e); }, { passive: false });
+  canvas.addEventListener('touchmove',  e => { e.preventDefault(); pointerMove(e); }, { passive: false });
+  canvas.addEventListener('touchend',   e => { e.preventDefault(); pointerUp(); }, { passive: false });
+  canvas.addEventListener('touchcancel', () => { drag = null; });
+  canvas.addEventListener('mousedown', e => { e.preventDefault(); pointerDown(e); });
+  window.addEventListener('mousemove', pointerMove);
+  window.addEventListener('mouseup', pointerUp);
+  canvas.addEventListener('wheel', e => {
+    if (!LIST_SCREENS[gameState]) return;
+    e.preventDefault();
+    listStep(e.deltaY > 0 ? 1 : -1);
+  }, { passive: false });
 
   function pressed(k) {
     if (k === 'L') return keys['ArrowLeft']  || keys['a'] || keys['A'] || pad.L;
@@ -1030,10 +1136,6 @@
 
   function eventDef() { return EVENTS.find(e => e.id === eventId) || null; }
 
-  function isBossLevel(l) {
-    return l === KING_LEVEL || l === QUEEN_LEVEL || l === JESTER_LEVEL || l >= KNIGHT_LEVEL;
-  }
-
   // Burrow 1 is always plain, so a run starts somewhere familiar, and the boss
   // floors are left alone - those fights are hard enough to read already.
   function rollEvent() {
@@ -1068,15 +1170,19 @@
   // The TWIST button, and the E key. Always a different twist from the one
   // already running, so a press always shows you something. The rolling in
   // rollEvent carries on exactly as before.
-  function triggerEvent() {
-    if (gameState !== 'play' || !player.alive) return;
-    const pool = EVENTS.filter(e => e.id !== eventId);
-    eventId = pool[(Math.random() * pool.length) | 0].id;
+  function setTwist(id) {
+    eventId = id;
     eventManual = true;
     eventBanner = EVENT_BANNER;
     rockfallTimer = ROCKFALL_GAP;
     applyEventSpeed();
-    if (eventId === 'swarm') swarmExtras();
+    if (id === 'swarm') swarmExtras();
+  }
+
+  function triggerEvent() {
+    if (gameState !== 'play' || !player.alive) return;
+    const pool = EVENTS.filter(e => e.id !== eventId);
+    setTwist(pool[(Math.random() * pool.length) | 0].id);
   }
 
   // ROCKFALL: a rock works its way out of the ceiling. It wobbles where you
@@ -1397,6 +1503,8 @@
       openCodeScreen('coins');
     } else if (key === 'b' || key === 'B') {
       openCodeScreen('boss');
+    } else if (key === 't' || key === 'T') {
+      openCodeScreen('twist');
     } else if (key === 'Enter' || key === ' ' || key === 'z' || key === 'Z') {
       activateMenu();
     }
@@ -1634,6 +1742,7 @@
   const KEYPAD_KEYS = [['1','2','3'],['4','5','6'],['7','8','9'],['DEL','0','OK']];
   const coinBtnBounds = { x: 6, y: HUD_H + 4, w: 24, h: 24 };
   const wantedBtnBounds = { x: VW - 34, y: HUD_H + 2, w: 30, h: 28 };
+  const twistBtnBounds = { x: 6, y: HUD_H + 34, w: 24, h: 24 };
   const menuBtnBounds = { x: 228, y: 0, w: 28, h: HUD_H };
   const eventBtnBounds = { x: VW - 36, y: VH - 13, w: 34, h: 12 };
   let codeDest = 'coins';         // what the keypad is guarding this time
@@ -1681,6 +1790,9 @@
       if (codeDest === 'boss') {
         gameState = 'bosspick';
         bossPickIndex = 0;
+      } else if (codeDest === 'twist') {
+        gameState = 'twistpick';
+        twistPickIndex = 0;
       } else {
         gameState = 'cheat';
         coinEntry = '';
@@ -1795,6 +1907,47 @@
       if (px1 >= b.x && px1 <= b.x + b.w && py1 >= b.y && py1 <= b.y + b.h) {
         bossPickIndex = b.idx;
         activateBossPick();
+        return;
+      }
+    }
+  }
+
+  // ====== Mystery block: pick a twist and go ======
+  // Same 4 digit code as the coin machine and the poster. Picking one starts
+  // a run with that twist already running - and, like the poster, a run you
+  // set up yourself pays no challenges.
+  const twistPickBounds = [];
+  let twistPickIndex = 0;
+
+  function startTwistRun(id) {
+    startGame();
+    runCheated = 1;
+    setTwist(id);
+  }
+
+  function activateTwistPick() {
+    if (twistPickIndex >= EVENTS.length) { gameState = 'menu'; return; }
+    startTwistRun(EVENTS[twistPickIndex].id);
+  }
+
+  function handleTwistPickKey(key) {
+    const rows = EVENTS.length + 1;
+    if (key === 'Escape' || key === 'Backspace') { gameState = 'menu'; return; }
+    if (key === 'ArrowUp' || key === 'w' || key === 'W') {
+      twistPickIndex = (twistPickIndex + rows - 1) % rows;
+    } else if (key === 'ArrowDown' || key === 's' || key === 'S') {
+      twistPickIndex = (twistPickIndex + 1) % rows;
+    } else if (key === 'Enter' || key === ' ' || key === 'z' || key === 'Z') {
+      activateTwistPick();
+    }
+  }
+
+  function handleTwistPickTap(ev) {
+    const [px1, py1] = canvasPoint(ev);
+    for (const b of twistPickBounds) {
+      if (px1 >= b.x && px1 <= b.x + b.w && py1 >= b.y && py1 <= b.y + b.h) {
+        twistPickIndex = b.idx;
+        activateTwistPick();
         return;
       }
     }
@@ -1958,6 +2111,11 @@
     const wb = wantedBtnBounds;
     if (px >= wb.x && px <= wb.x + wb.w && py >= wb.y && py <= wb.y + wb.h) {
       openCodeScreen('boss');
+      return;
+    }
+    const tb = twistBtnBounds;
+    if (px >= tb.x && px <= tb.x + tb.w && py >= tb.y && py <= tb.y + tb.h) {
+      openCodeScreen('twist');
       return;
     }
     for (let i = 0; i < menuBounds.length; i++) {
@@ -2276,28 +2434,27 @@
 
   function nextLevel() {
     chalClear();
-    if (level >= KNIGHT_LEVEL) {
-      if (!owned.shell) {
-        owned.shell = true;
-        saveProgress();
-      }
+    if (level >= FINAL_LEVEL) {
       gameState = 'beat';
       stateTimer = 0;
       return;
     }
-    const prize = level === KING_LEVEL ? 'shades'
-                : level === QUEEN_LEVEL ? 'bow'
-                : level === JESTER_LEVEL ? 'jester' : null;
-    if (prize) {
-      if (!owned[prize]) {
+    const type = bossAt(level);
+    if (type) {
+      // Only the first burrow each one owns hands over a hat. After that he
+      // is just another fight, and a harder one.
+      const prize = level === KING_LEVEL ? 'shades'
+                  : level === QUEEN_LEVEL ? 'bow'
+                  : level === JESTER_LEVEL ? 'jester'
+                  : level === KNIGHT_LEVEL ? 'shell' : null;
+      if (prize && !owned[prize]) {
         owned[prize] = true;
         saveProgress();
       }
-      bossWin = prize === 'shades'
-        ? { title: 'THE KING FALLS', prize: 'YOU TOOK HIS SHADES' }
-        : prize === 'jester'
-        ? { title: 'THE JESTER FALLS', prize: 'HIS CAP IS YOURS' }
-        : { title: 'THE QUEEN FALLS', prize: 'THE BOW IS YOURS' };
+      bossWin = prize
+        ? { title: BOSS_FALLS[type], prize: BOSS_PRIZE[prize], note: 'WEAR IT FROM THE SHOP' }
+        : { title: BOSS_FALLS[type], prize: 'HE WILL BE BACK',
+            note: 'BURROW ' + (level + 1) + ' OF ' + FINAL_LEVEL };
       level++;
       gameState = 'bosswin';
       stateTimer = 0;
@@ -3553,6 +3710,46 @@
     rect(x+3, y+22, 22, 1, C.paperD);
   }
 
+  function drawTwistPick() {
+    ctx.fillStyle = 'rgba(0,0,0,0.9)';
+    ctx.fillRect(0, HUD_H, VW, PLAY_H);
+    drawCenter('TWISTS', 24, C.yellow, 2);
+    drawCenter('PICK ONE AND DIG - NO CHALLENGES', 44, C.text, 1);
+
+    twistPickBounds.length = 0;
+    const rows = EVENTS.length + 1;
+    const baseY = 60, lineH = 18;
+    for (let i = 0; i < rows; i++) {
+      const y = baseY + i * lineH;
+      const sel = twistPickIndex === i;
+      if (i === EVENTS.length) {
+        const label = 'BACK';
+        const lx = Math.floor((VW - label.length * 4) / 2);
+        drawText(label, lx, y, sel ? C.yellow : C.text, 1);
+        if (sel) drawPointer(lx - 12, y);
+        twistPickBounds.push({ x: lx - 16, y: y - 5, w: label.length * 4 + 24, h: 14, idx: i });
+        continue;
+      }
+      const ev = EVENTS[i];
+      drawText(ev.name, 40, y, sel ? C.yellow : ev.color, 1);
+      drawText(ev.line, 40, y + 8, C.rock1, 1);
+      if (sel) drawPointer(28, y);
+      twistPickBounds.push({ x: 24, y: y - 5, w: 208, h: 17, idx: i });
+    }
+
+    drawCenter('ENTER: PLAY IT   ESC: BACK', VH - 12, C.text, 1);
+  }
+
+  // Title-screen mystery block, next in line under the coin
+  function drawTwistButton() {
+    const x = twistBtnBounds.x + 2, y = twistBtnBounds.y + 2;   // 20x20
+    rect(x, y, 20, 20, C.dirt3);
+    rect(x + 1, y + 1, 18, 18, C.dirt2);
+    rect(x + 1, y + 1, 18, 1, C.dirt1);
+    rect(x + 1, y + 18, 18, 1, '#000000');
+    drawText('?', x + 7, y + 5, C.yellow, 2);
+  }
+
   // Small 20x20 boss portraits for the wanted list
   function drawQueenFace(x, y) {
     rect(x+2,  y+6,  16, 13, C.mole2);
@@ -4427,7 +4624,9 @@
       drawCenter('HE IS SLIPPING!', VH/2 - 64, C.red, 2);
     }
 
-    // Overlays
+    // Overlays. The scroll buttons belong to whichever list draws next, if
+    // any - cleared here so a stale one cannot outlive its screen.
+    clearScrollBtns();
     if (gameState === 'menu') {
       drawMenu();
     } else if (gameState === 'shop') {
@@ -4440,6 +4639,8 @@
       drawAsmScreen();
     } else if (gameState === 'bosspick') {
       drawBossPick();
+    } else if (gameState === 'twistpick') {
+      drawTwistPick();
     } else if (gameState === 'code') {
       drawCodeScreen();
     } else if (gameState === 'cheat') {
@@ -4459,22 +4660,20 @@
       );
     } else if (gameState === 'win') {
       drawCenter('LEVEL ' + (level-1) + ' CLEAR', VH/2, C.yellow, 1);
-      const boss = level === KING_LEVEL ? 'THE KINGS NEST!'
-                 : level === QUEEN_LEVEL ? 'THE QUEENS BURROW!'
-                 : level === JESTER_LEVEL ? 'THE JESTERS HILL!' : null;
-      drawCenter(boss || 'NEXT BURROW', VH/2 + 12, boss ? C.red : C.text, 1);
+      const lair = BOSS_LAIR[bossAt(level)];
+      drawCenter(lair || 'NEXT BURROW', VH/2 + 12, lair ? C.red : C.text, 1);
     } else if (gameState === 'bosswin') {
       drawCenter(bossWin.title, VH/2 - 26, C.yellow, 2);
       drawCenter(bossWin.prize, VH/2, C.red, 1);
-      drawCenter('WEAR IT FROM THE SHOP', VH/2 + 12, C.text, 1);
+      drawCenter(bossWin.note || '', VH/2 + 12, C.text, 1);
       drawCenter('DEEPER BURROWS AHEAD...', VH/2 + 30, C.text, 1);
     } else if (gameState === 'beat') {
-      drawCenter('THE KNIGHT FALLS', VH/2 - 34, C.yellow, 2);
+      drawCenter('BURROW ' + FINAL_LEVEL, VH/2 - 34, C.yellow, 2);
       drawCenter('SCORE ' + score, VH/2 - 8, C.text, 1);
       drawCenter('COINS +' + runCoins, VH/2 + 4, C.coin1, 1);
       drawCenter('SLUGBUCKS +' + runSlugs, VH/2 + 16, C.slug1, 1);
-      drawCenter('YOU WON HIS SHELL', VH/2 + 34, C.beet1, 1);
-      drawCenter('WEAR IT FROM THE SHOP', VH/2 + 46, C.text, 1);
+      drawCenter('YOU DUG ALL THE WAY DOWN', VH/2 + 34, C.sq1, 1);
+      drawCenter('NOTHING LEFT BUT ROCK', VH/2 + 46, C.text, 1);
       if ((Math.floor(performance.now()/400) % 2) === 0) {
         drawCenter('PRESS ENTER', VH/2 + 62, C.text, 1);
       }
@@ -4585,6 +4784,7 @@
     // Secret buttons, up top and clear of the touch controls
     drawCoinButton();
     drawWantedButton();
+    drawTwistButton();
 
     // Hint at bottom - the difficulty row has its own
     if (menuIndex === M_DIFF) drawCenter('LEFT/RIGHT TO CHANGE', VH - 14, C.red, 1);
@@ -4652,7 +4852,7 @@
       : sel.desc;
     drawCenter(desc, descY, C.text, 1);
     if (shopMsgTimer > 0) drawCenter(shopMsg, descY + 10, shopMsgColor, 1);
-    drawCenter('ENTER: BUY OR WEAR', VH - 14, C.text, 1);
+    drawCenter('DRAG TO SCROLL   TAP TO BUY', VH - 14, C.text, 1);
   }
 
   function drawCursorShop() {
@@ -4715,7 +4915,7 @@
       : sel.desc;
     drawCenter(desc, descY, C.text, 1);
     if (shopMsgTimer > 0) drawCenter(shopMsg, descY + 10, shopMsgColor, 1);
-    drawCenter('ENTER: BUY OR USE', VH - 14, C.text, 1);
+    drawCenter('DRAG TO SCROLL   TAP TO USE', VH - 14, C.text, 1);
   }
 
   function drawChallenges() {
@@ -4769,7 +4969,7 @@
     const sel = chalIndex < CHALLENGES.length ? CHALLENGES[chalIndex] : null;
     drawCenter(sel ? sel.desc : 'BACK TO THE MENU.', descY, C.text, 1);
     if (shopMsgTimer > 0) drawCenter(shopMsg, descY + 10, shopMsgColor, 1);
-    drawCenter('THEY TICK OFF AS YOU PLAY', VH - 14, C.text, 1);
+    drawCenter('DRAG TO SCROLL   THEY TICK AS YOU PLAY', VH - 14, C.text, 1);
   }
 
   // A little green check against a challenge that is in the bag.
@@ -4784,6 +4984,12 @@
   }
 
   function drawScrollArrow(x, y, up) {
+    // Registered as a tap target as it is drawn, so the two can never drift
+    // apart. A press jumps a whole page.
+    setScrollBtn(up ? scrollUpBounds : scrollDownBounds, x, y);
+    rect(x - 3, y - 3, 11, 9, '#3a1c0a');
+    rect(x - 3, y - 3, 11, 1, C.dirt1);
+    rect(x - 3, y + 5, 11, 1, '#000000');
     if (up) {
       px(x + 2, y, C.rock1);
       rect(x + 1, y + 1, 3, 1, C.rock1);
@@ -4848,7 +5054,7 @@
       ['EVERY KILL PAYS COINS'],
       ['SPEND THEM IN THE SHOP'],
       ['ON HATS THAT HELP YOU'],
-      ['BOSSES ON 5 10 15 AND 20'],
+      ['A BOSS EVERY 5 BURROWS'],
       ['LET GO BEFORE THEY SLIP'],
       ['',       ''],
       ['SOME BURROWS HAVE A TWIST'],
