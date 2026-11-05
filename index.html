@@ -359,6 +359,9 @@
     for (let i = 0; i < n; i++) spawn('pd');
     for (let i = 0; i < nSquiggle; i++) spawn('squiggle');
     for (let i = 0; i < nAnt; i++) spawn('ant');
+    if (eventId === 'swarm') {          // a crowded burrow - and a richer one
+      spawn('pd'); spawn('pd'); spawn('squiggle'); spawn('ant');
+    }
   }
 
   // ====== The Queen Mole ======
@@ -863,6 +866,8 @@
       handleShopKey(e.key);
     } else if (gameState === 'cursors') {
       handleCursorKey(e.key);
+    } else if (gameState === 'chal') {
+      handleChalKey(e.key);
     } else if (gameState === 'asm') {
       handleAsmKey(e.key);
     } else if (gameState === 'bosspick') {
@@ -912,6 +917,8 @@
       handleShopTap(ev);
     } else if (gameState === 'cursors') {
       handleCursorTap(ev);
+    } else if (gameState === 'chal') {
+      handleChalTap(ev);
     } else if (gameState === 'asm') {
       handleAsmTap(ev);
     } else if (gameState === 'bosspick') {
@@ -985,10 +992,66 @@
   let level = 1;
   let score = 0;
   let lives = 3;
-  let gameState = 'menu'; // menu, howto, shop, play, dead, win, over
+  let gameState = 'menu'; // menu, howto, shop, chal, play, dead, win, over
   let stateTimer = 0;
   let deathCause = 'chomp'; // 'chomp' or 'squish'
   let rocks = []; // active falling rock physics objects: {x,y,vy,r,c,landed}
+
+  // ====== Burrow events ======
+  // Every so often a burrow comes with a twist. It is rolled when the burrow
+  // is dug, announced with a banner, and lasts that burrow only. Nothing here
+  // is tied to a date or a season - they just turn up.
+  const EVENTS = [
+    { id: 'gold',  name: 'GOLD RUSH',  line: 'EVERY COIN PAYS DOUBLE',   color: C.coin1 },
+    { id: 'slugs', name: 'SLUG TIDE',  line: 'EVERYTHING DROPS SLUGBUCKS', color: C.slug1 },
+    { id: 'soil',  name: 'LOOSE SOIL', line: 'THE DIGGING IS EASY',      color: C.dirt1 },
+    { id: 'swarm', name: 'SWARM',      line: 'CROWDED, AND WORTH DOUBLE', color: C.pd1 },
+    { id: 'rocks', name: 'ROCKFALL',   line: 'THE CEILING IS LOOSE',     color: C.rock1 },
+    { id: 'dark',  name: 'BLACKOUT',   line: 'DIG BY FEEL',              color: C.magic1 },
+  ];
+  const EVENT_CHANCE = 0.3;        // roughly one burrow in three
+  const EVENT_BANNER = 150;        // frames the announcement stays up
+  const ROCKFALL_GAP = 160;        // frames between rocks letting go
+  const ROCKFALL_WARN = 45;        // frames one wobbles before it drops
+  const DARK_RADIUS = TILE * 3.5;  // how far the worm can see in a blackout
+  let eventId = null;
+  let eventBanner = 0;
+  let rockfallTimer = 0;
+
+  function eventDef() { return EVENTS.find(e => e.id === eventId) || null; }
+
+  function isBossLevel(l) {
+    return l === KING_LEVEL || l === QUEEN_LEVEL || l === JESTER_LEVEL || l >= KNIGHT_LEVEL;
+  }
+
+  // Burrow 1 is always plain, so a run starts somewhere familiar, and the boss
+  // floors are left alone - those fights are hard enough to read already.
+  function rollEvent() {
+    eventId = null;
+    eventBanner = 0;
+    rockfallTimer = ROCKFALL_GAP;
+    if (level < 2 || isBossLevel(level)) return;
+    if (Math.random() >= EVENT_CHANCE) return;
+    eventId = EVENTS[(Math.random() * EVENTS.length) | 0].id;
+    eventBanner = EVENT_BANNER;
+  }
+
+  // ROCKFALL: a rock works its way out of the ceiling. It wobbles where you
+  // can see it first, and never right on top of the worm.
+  function shakeLooseRock() {
+    const spots = [];
+    for (let r = 0; r < ROWS - 1; r++) {
+      for (let c = 0; c < COLS; c++) {
+        if (grid[r][c] !== EMPTY || grid[r + 1][c] !== EMPTY) continue;
+        const x = c * TILE, y = r * TILE;
+        if (Math.abs(x - player.x) < TILE * 2 && Math.abs(y - player.y) < TILE * 2) continue;
+        spots.push([x, y]);
+      }
+    }
+    if (!spots.length) return;
+    const [x, y] = spots[(Math.random() * spots.length) | 0];
+    rocks.push({ x, y, vy: 0, wobble: ROCKFALL_WARN, landed: false });
+  }
 
   // ====== Coins, shop and hats ======
   // Coins and hats persist between runs; only one hat can be worn at a time.
@@ -1060,7 +1123,37 @@
     { id: 'buck',   name: 'SLUGBUCK',    cost: 12, cur: 'slug', desc: 'THE SLUGS FINEST CURRENCY.' },
     { id: 'slug',   name: 'SLUG',        cost: 6,  cur: 'slug', desc: 'THE ASM SLUGS LITTLE COUSIN.' },
     { id: 'crown',  name: 'TINY CROWN',  cost: 15, cur: 'slug', desc: 'POINT LIKE ROYALTY.' },
+    { id: 'medal',  name: 'GOLD MEDAL',  cost: 0,  cur: 'unlock', desc: 'EARNED, NOT BOUGHT.',
+      lockedDesc: 'FINISH GIANT SLAYER TO UNLOCK.' },
+    { id: 'trophy', name: 'THE TROPHY',  cost: 0,  cur: 'unlock', desc: 'EVERY CHALLENGE, DONE.',
+      lockedDesc: 'FINISH EVERY CHALLENGE TO UNLOCK.' },
   ];
+  // Standing goals. Nothing to start and nothing seasonal about them - they
+  // tick over during ordinary runs, pay once, and two of them hand you a
+  // pointer that is not for sale at any price.
+  const CHALLENGES = [
+    { id: 'rockhound', name: 'ROCK HOUND',   cur: 'coin', cost: 75,
+      desc: 'SQUASH 5 WITH ROCKS IN ONE RUN.' },
+    { id: 'purist',    name: 'PURIST',       cur: 'coin', cost: 70,
+      desc: 'CLEAR A BURROW DROPPING NO ROCKS.' },
+    { id: 'speeddig',  name: 'SPEED DIG',    cur: 'coin', cost: 60,
+      desc: 'CLEAR A BURROW INSIDE 30 SECONDS.' },
+    { id: 'untouched', name: 'UNTOUCHABLE',  cur: 'coin', cost: 100,
+      desc: 'CLEAR 3 IN A ROW, NO LIVES LOST.' },
+    { id: 'stormer',   name: 'STORM CHASER', cur: 'coin', cost: 80,
+      desc: 'CLEAR A BURROW WITH A TWIST ON.' },
+    { id: 'bareworm',  name: 'BARE WORM',    cur: 'slug', cost: 10,
+      desc: 'CLEAR 3 BURROWS WEARING NO HAT.' },
+    { id: 'hoarder',   name: 'HOARDER',      cur: 'slug', cost: 12,
+      desc: 'TAKE 120 COINS IN ONE RUN.' },
+    { id: 'deepdive',  name: 'DEEP DIVE',    cur: 'slug', cost: 15,
+      desc: 'REACH BURROW 8 IN ONE RUN.' },
+    { id: 'slayer',    name: 'GIANT SLAYER', cur: 'cursor', prize: 'medal',
+      desc: 'BEAT A BOSS WITHOUT LOSING A LIFE.' },
+    { id: 'thelot',    name: 'THE LOT',      cur: 'cursor', prize: 'trophy',
+      desc: 'FINISH EVERY OTHER CHALLENGE.' },
+  ];
+
   let coins = 0;
   let slugs = 0;
   let runCoins = 0;      // coins picked up in the current run, shown on game over
@@ -1080,6 +1173,16 @@
   let breakFreeMsg = 0;  // 'HE SHAKES IT OFF!' when a boss tears loose
   let shellLeft = 0;     // the shell is good for three knocks a burrow
   let shellFlash = 0;
+  let chalDone = {};     // challenges ticked off for good, kept in the save
+  let chalMsg = '';      // 'CHALLENGE DONE' banner
+  let chalMsgTimer = 0;
+  let runRockKills = 0;  // enemies squashed by rock this run
+  let runClean = 0;      // burrows cleared since the last life lost
+  let runBare = 0;       // burrows cleared this run with no hat on
+  let runCheated = 0;    // a run started from the wanted poster earns nothing
+  let levelDeaths = 0;   // lives lost on the burrow being played now
+  let burrowFrames = 0;  // how long that burrow has taken
+  let burrowRocks = 0;   // rocks the worm has brought down in it
   let bossWin = { title: '', prize: '' };   // which boss the clear screen is for
 
   // Coins paid per kill. Rock crushes pay better than pops.
@@ -1122,6 +1225,7 @@
       if (equipped === 'jester') { payCoins *= 2; paySlugs *= 2; }
       coins += payCoins;
       runCoins += payCoins;
+      if (runCoins >= 120) chalWin('hoarder');
       slugs = Math.min(99999, slugs + paySlugs);
       runSlugs += paySlugs;
       coinFlash = 60;
@@ -1129,19 +1233,26 @@
       saveProgress();
       return;
     }
+    const swarmMul = eventId === 'swarm' ? 2 : 1;
     if (how === 'rock') {
-      score += target.type === 'squiggle' ? 250 : target.type === 'ant' ? 350 : 500;
+      score += (target.type === 'squiggle' ? 250 : target.type === 'ant' ? 350 : 500) * swarmMul;
     } else {
-      score += target.type === 'squiggle' ? 100 : target.type === 'ant' ? 150 : 200;
+      score += (target.type === 'squiggle' ? 100 : target.type === 'ant' ? 150 : 200) * swarmMul;
+    }
+    if (how === 'rock') {
+      runRockKills++;
+      if (runRockKills >= 5) chalWin('rockhound');
     }
     if (byHelper) return;
-    const bonus = equipped === 'jester' ? 2 : 1;   // the cap pays double
+    // The cap pays double, and so does a gold rush. They stack.
+    const bonus = (equipped === 'jester' ? 2 : 1) * (eventId === 'gold' ? 2 : 1);
     const kind = COIN_VALUES[how][target.type] !== undefined ? target.type : 'pd';
     const pay = COIN_VALUES[how][kind] * bonus;
     coins += pay;
     runCoins += pay;
     coinFlash = 24;
-    if (target.type === 'squiggle') {
+    if (runCoins >= 120) chalWin('hoarder');
+    if (target.type === 'squiggle' || eventId === 'slugs') {
       const slugPay = SLUG_VALUES[how] * bonus;
       slugs += slugPay;
       runSlugs += slugPay;
@@ -1150,11 +1261,50 @@
     saveProgress();
   }
 
+  // One challenge done. A run begun from the wanted poster skips burrows, so
+  // it earns nothing - otherwise DEEP DIVE would be a single keypress.
+  function chalWin(id) {
+    if (runCheated || chalDone[id]) return;
+    const ch = CHALLENGES.find(c => c.id === id);
+    if (!ch) return;
+    chalDone[id] = true;
+    if (ch.cur === 'coin') {
+      coins += ch.cost; runCoins += ch.cost; coinFlash = 60;
+    } else if (ch.cur === 'slug') {
+      slugs += ch.cost; runSlugs += ch.cost; slugFlash = 60;
+    } else if (ch.cur === 'cursor') {
+      cursorsOwned[ch.prize] = true;
+    }
+    chalMsg = ch.name;
+    chalMsgTimer = 160;
+    saveProgress();
+    // The capstone, once everything else has a tick against it.
+    if (id !== 'thelot' && CHALLENGES.every(c => c.id === 'thelot' || chalDone[c.id])) {
+      chalWin('thelot');
+    }
+  }
+
+  // Everything that can come good the moment a burrow is cleared.
+  function chalClear() {
+    if (burrowRocks === 0) chalWin('purist');
+    if (burrowFrames < 30 * 60) chalWin('speeddig');
+    if (eventId) chalWin('stormer');
+    if (isBossLevel(level) && levelDeaths === 0) chalWin('slayer');
+    if (level >= 7) chalWin('deepdive');       // clearing 7 puts you in 8
+    runClean++;
+    if (runClean >= 3) chalWin('untouched');
+    if (equipped === 'none') {
+      runBare++;
+      if (runBare >= 3) chalWin('bareworm');
+    }
+    levelDeaths = 0;
+  }
+
   const SAVE_KEY = 'earthworm.save.v1';
   function saveProgress() {
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify({
-        coins, slugs, owned, equipped, cursorsOwned, cursorEquipped,
+        coins, slugs, owned, equipped, cursorsOwned, cursorEquipped, chalDone,
       }));
     } catch (e) { /* storage blocked - play on without saving */ }
   }
@@ -1176,12 +1326,15 @@
           && CURSORS.some(c => c.id === d.cursorEquipped)) {
         cursorEquipped = d.cursorEquipped;
       }
+      if (d.chalDone && typeof d.chalDone === 'object') {
+        for (const c of CHALLENGES) if (d.chalDone[c.id]) chalDone[c.id] = true;
+      }
     } catch (e) { /* missing or corrupt save - start fresh */ }
   }
 
   // ====== Menu ======
-  const MENU_ITEMS = ['PLAY', 'SHOP', 'CURSORS', 'ASM', 'HOW TO PLAY', 'DIFFICULTY'];
-  const M_PLAY = 0, M_SHOP = 1, M_CURSORS = 2, M_ASM = 3, M_HOWTO = 4, M_DIFF = 5;
+  const MENU_ITEMS = ['PLAY', 'SHOP', 'CURSORS', 'CHALLENGES', 'ASM', 'HOW TO PLAY', 'DIFFICULTY'];
+  const M_PLAY = 0, M_SHOP = 1, M_CURSORS = 2, M_CHAL = 3, M_ASM = 4, M_HOWTO = 5, M_DIFF = 6;
   const DIFF_NAMES = ['EASY', 'NORMAL', 'HARD'];
   let menuIndex = 0;
   let difficulty = 1; // 0=easy 1=normal 2=hard
@@ -1210,6 +1363,7 @@
     if (menuIndex === M_PLAY) startGame();
     else if (menuIndex === M_SHOP) { gameState = 'shop'; shopMsgTimer = 0; }
     else if (menuIndex === M_CURSORS) { gameState = 'cursors'; shopMsgTimer = 0; }
+    else if (menuIndex === M_CHAL) { gameState = 'chal'; shopMsgTimer = 0; }
     else if (menuIndex === M_ASM) {
       if (asmLocked()) return;     // the slug is still sulking
       gameState = 'asm';
@@ -1275,6 +1429,7 @@
     } else if (h.cur === 'unlock') {
       shopMessage(h.id === 'shades' ? 'BEAT THE KING HORNET FIRST'
                 : h.id === 'jester' ? 'BEAT THE JESTER ANT FIRST'
+                : h.id === 'shell'  ? 'BEAT THE KNIGHT BEETLE FIRST'
                 : 'BEAT THE QUEEN MOLE FIRST', C.red);
     } else {
       const purse = h.cur === 'slug' ? slugs : coins;
@@ -1348,6 +1503,8 @@
         saveProgress();
         shopMessage(c.name + ' IT IS', C.sq1);
       }
+    } else if (c.cur === 'unlock') {
+      shopMessage('NOT FOR SALE - EARN IT', C.red);
     } else {
       const purse = c.cur === 'slug' ? slugs : coins;
       if (purse >= c.cost) {
@@ -1372,6 +1529,56 @@
         cursorIndex = b.idx;
         clampCursorScroll();
         activateCursorShop();
+        return;
+      }
+    }
+  }
+
+  // ====== Challenge board ======
+  // Nothing to buy here. The list shows what is left to do and what it pays.
+  let chalIndex = 0;
+  let chalScroll = 0;
+  const chalBounds = [];
+  const CHAL_ROWS = CHALLENGES.length + 1;   // every challenge, then BACK
+  const CHAL_VISIBLE = 9;
+
+  function clampChalScroll() {
+    const last = Math.max(0, CHAL_ROWS - CHAL_VISIBLE);
+    if (chalIndex < chalScroll) chalScroll = chalIndex;
+    else if (chalIndex > chalScroll + CHAL_VISIBLE - 1) {
+      chalScroll = chalIndex - CHAL_VISIBLE + 1;
+    }
+    chalScroll = Math.max(0, Math.min(last, chalScroll));
+  }
+
+  function handleChalKey(key) {
+    if (key === 'ArrowUp' || key === 'w' || key === 'W') {
+      chalIndex = (chalIndex + CHAL_ROWS - 1) % CHAL_ROWS;
+      clampChalScroll();
+    } else if (key === 'ArrowDown' || key === 's' || key === 'S') {
+      chalIndex = (chalIndex + 1) % CHAL_ROWS;
+      clampChalScroll();
+    } else if (key === 'Escape' || key === 'Backspace') {
+      gameState = 'menu';
+    } else if (key === 'Enter' || key === ' ' || key === 'z' || key === 'Z') {
+      activateChal();
+    }
+  }
+
+  function activateChal() {
+    if (chalIndex === CHALLENGES.length) { gameState = 'menu'; return; }
+    const ch = CHALLENGES[chalIndex];
+    if (chalDone[ch.id]) shopMessage('ALREADY DONE', C.sq1);
+    else shopMessage('EARN IT IN A RUN', C.text);
+  }
+
+  function handleChalTap(ev) {
+    const [px1, py1] = canvasPoint(ev);
+    for (const b of chalBounds) {
+      if (px1 >= b.x && px1 <= b.x + b.w && py1 >= b.y && py1 <= b.y + b.h) {
+        chalIndex = b.idx;
+        clampChalScroll();
+        activateChal();
         return;
       }
     }
@@ -1512,6 +1719,11 @@
     level = lvl;
     runCoins = 0;
     runSlugs = 0;
+    runRockKills = 0;
+    runClean = 0;
+    runBare = 0;
+    levelDeaths = 0;
+    runCheated = 1;      // the poster skips the digging, so it skips the prizes
     beginLevel();
     gameState = 'play';
   }
@@ -1720,13 +1932,20 @@
     level = 1;
     runCoins = 0;
     runSlugs = 0;
+    runRockKills = 0;
+    runClean = 0;
+    runBare = 0;
+    levelDeaths = 0;
+    runCheated = 0;
     beginLevel();
     gameState = 'play';
   }
 
   function beginLevel() {
+    rollEvent();             // before the dirt, so SWARM can seed extra minions
     makeLevel(level);
     spawnPlayer();
+    if (eventId === 'soil') player.speed *= 1.4;
     spawnPDs(level);
     rocks = [];
     mines = [];            // three fresh mines every burrow
@@ -1743,6 +1962,8 @@
     breakFreeMsg = 0;
     shellLeft = equipped === 'shell' ? 3 : 0;
     shellFlash = 0;
+    burrowFrames = 0;
+    burrowRocks = 0;
     helper = equipped === 'magic' ? makeHelper() : null;
   }
 
@@ -1998,6 +2219,8 @@
   function loseLife(cause) {
     deathCause = cause || 'chomp';
     lives--;
+    levelDeaths++;
+    runClean = 0;
     if (lives <= 0) {
       gameState = 'over';
       stateTimer = 0;
@@ -2008,6 +2231,7 @@
   }
 
   function nextLevel() {
+    chalClear();
     if (level >= KNIGHT_LEVEL) {
       if (!owned.shell) {
         owned.shell = true;
@@ -2052,6 +2276,8 @@
     if (bossGuardMsg > 0) bossGuardMsg--;
     if (shieldMsg > 0) shieldMsg--;
     if (breakFreeMsg > 0) breakFreeMsg--;
+    if (eventBanner > 0) eventBanner--;
+    if (chalMsgTimer > 0) chalMsgTimer--;
     if (shellFlash > 0) shellFlash--;
     if (shopMsgTimer > 0) shopMsgTimer--;
     if (codeMsgTimer > 0) codeMsgTimer--;
@@ -2067,6 +2293,7 @@
       }
     }
     if (gameState === 'play') {
+      burrowFrames++;
       updatePlayer();
       updateMines();
       updateBlackHole();
@@ -2074,6 +2301,10 @@
       updateHelper();
       updatePDs();
       updateRocks();
+      if (eventId === 'rocks' && player.alive) {
+        rockfallTimer--;
+        if (rockfallTimer <= 0) { rockfallTimer = ROCKFALL_GAP; shakeLooseRock(); }
+      }
       // Win? On her floor only she matters - the court keeps coming.
       const boss = pds.find(isBoss);
       if (boss ? !boss.alive : pds.every(p => !p.alive)) nextLevel();
@@ -2511,6 +2742,7 @@
           if (below === EMPTY) {
             // Convert into falling rock object
             grid[r][c] = EMPTY;
+            burrowRocks++;     // PURIST counts the ones the worm brings down
             rocks.push({
               x: c * TILE,
               y: r * TILE,
@@ -3746,6 +3978,25 @@
     px(x + 3, y + 3, C.red);              // one jewel
   }
 
+  // A medal on its ribbon, for taking a boss down without losing a life.
+  function drawCursorMedal(x, y) {
+    rect(x + 1, y - 2, 2, 3, C.bowL);     // ribbon
+    rect(x + 5, y - 2, 2, 3, C.bowD);
+    rect(x + 1, y + 1, 6, 5, C.coin2);    // disc
+    rect(x + 2, y + 2, 4, 3, C.coin1);
+    px(x + 3, y + 3, C.coin2);
+  }
+
+  // The cup for finishing every last challenge.
+  function drawCursorTrophy(x, y) {
+    rect(x + 1, y - 1, 6, 3, C.coin1);    // bowl
+    rect(x + 2, y + 2, 4, 1, C.coin2);
+    px(x, y, C.coin2);                    // handles
+    px(x + 7, y, C.coin2);
+    rect(x + 3, y + 3, 2, 2, C.coin2);    // stem
+    rect(x + 1, y + 5, 6, 2, C.paperD);   // base
+  }
+
   const CURSOR_ART = {
     worm: drawCursorWorm, pd: drawCursorPD, squig: drawCursorSquiggle,
     ant: drawCursorAnt, burger: drawCursorBurger,
@@ -3763,6 +4014,7 @@
     sun: drawCursorSun, moon: drawCursorMoon,
     rocket: drawCursorRocket, star: drawCursorStar, coin: drawCursorCoin,
     buck: drawCursorSlugBuck, slug: drawCursorSlug, crown: drawCursorCrown,
+    medal: drawCursorMedal, trophy: drawCursorTrophy,
   };
 
   function drawCursorArt(id, x, y) {
@@ -4041,9 +4293,11 @@
     }
     drawBlackHole();
     drawMines();
-    // Falling rocks
+    // Falling rocks. One still winding up shakes where it sits, so there is
+    // always a moment to get out from under it.
     for (const rk of rocks) {
-      drawRockAt(rk.x, rk.y + HUD_H);
+      const shake = (rk.wobble > 0 && (Math.floor(rk.wobble / 3) % 2)) ? 1 : 0;
+      drawRockAt(rk.x + shake, rk.y + HUD_H);
     }
     // Enemies (prairie dogs + squiggles)
     for (const p of pds) {
@@ -4075,6 +4329,22 @@
     }
     // Squirt
     drawSquirt(player, C.squirt);
+
+    // BLACKOUT puts out the lights everywhere but around the worm.
+    if (eventId === 'dark' && (gameState === 'play' || gameState === 'dead')) {
+      drawBlackout();
+    }
+    // Whatever twist is on, named in the corner for as long as it lasts.
+    if (eventId && gameState === 'play') {
+      const ev = eventDef();
+      rect(1, VH - 10, ev.name.length * 4 + 4, 9, '#000');
+      drawText(ev.name, 3, VH - 8, ev.color, 1);
+    }
+    if (eventBanner > 0 && gameState === 'play') {
+      const ev = eventDef();
+      drawCenter(ev.name + '!', VH/2 - 30, ev.color, 2);
+      drawCenter(ev.line, VH/2 - 10, C.text, 1);
+    }
     if (armorFlash > 0 && gameState === 'play') {
       drawCenter('CLANG!', VH/2 - 40, C.steel, 2);
     }
@@ -4099,6 +4369,10 @@
     if (breakFreeMsg > 0 && gameState === 'play') {
       drawCenter('HE SHAKES IT OFF!', VH/2 - 52, C.yellow, 1);
     }
+    if (chalMsgTimer > 0 && gameState === 'play') {
+      drawCenter('CHALLENGE DONE', VH/2 + 24, C.yellow, 1);
+      drawCenter(chalMsg, VH/2 + 36, C.sq1, 1);
+    }
     if (shellFlash > 0 && gameState === 'play') {
       drawCenter('THE SHELL HOLDS! ' + shellLeft + ' LEFT', VH/2 - 40, C.beet1, 1);
     }
@@ -4114,6 +4388,8 @@
       drawShop();
     } else if (gameState === 'cursors') {
       drawCursorShop();
+    } else if (gameState === 'chal') {
+      drawChallenges();
     } else if (gameState === 'asm') {
       drawAsmScreen();
     } else if (gameState === 'bosspick') {
@@ -4147,11 +4423,11 @@
       drawCenter('WEAR IT FROM THE SHOP', VH/2 + 12, C.text, 1);
       drawCenter('DEEPER BURROWS AHEAD...', VH/2 + 30, C.text, 1);
     } else if (gameState === 'beat') {
-      drawCenter('THE JESTER FALLS', VH/2 - 34, C.yellow, 2);
+      drawCenter('THE KNIGHT FALLS', VH/2 - 34, C.yellow, 2);
       drawCenter('SCORE ' + score, VH/2 - 8, C.text, 1);
       drawCenter('COINS +' + runCoins, VH/2 + 4, C.coin1, 1);
       drawCenter('SLUGBUCKS +' + runSlugs, VH/2 + 16, C.slug1, 1);
-      drawCenter('YOU WON HIS CAP', VH/2 + 34, C.jest1, 1);
+      drawCenter('YOU WON HIS SHELL', VH/2 + 34, C.beet1, 1);
       drawCenter('WEAR IT FROM THE SHOP', VH/2 + 46, C.text, 1);
       if ((Math.floor(performance.now()/400) % 2) === 0) {
         drawCenter('PRESS ENTER', VH/2 + 62, C.text, 1);
@@ -4163,6 +4439,20 @@
       drawCenter('SLUGBUCKS +' + runSlugs, VH/2 + 40, C.slug1, 1);
       if ((Math.floor(performance.now()/400) % 2) === 0) {
         drawCenter('PRESS ENTER', VH/2 + 54, C.text, 1);
+      }
+    }
+  }
+
+  // Black out every tile past the worm's own pool of light, with one ring of
+  // half-dark at the edge so it fades instead of stopping dead.
+  function drawBlackout() {
+    const cx = player.x + 8, cy = player.y + 8;
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const d = Math.hypot(c * TILE + 8 - cx, r * TILE + 8 - cy);
+        if (d <= DARK_RADIUS - TILE) continue;
+        ctx.fillStyle = d > DARK_RADIUS ? '#000' : 'rgba(0,0,0,0.6)';
+        ctx.fillRect(c * TILE, r * TILE + HUD_H, TILE, TILE);
       }
     }
   }
@@ -4212,8 +4502,8 @@
 
     // Draw the chosen pointer + menu items
     menuBounds.length = 0;
-    const baseY = 78;
-    const lineH = 12;
+    const baseY = 74;    // seven rows now, so they sit a touch tighter
+    const lineH = 11;
     for (let i = 0; i < MENU_ITEMS.length; i++) {
       const shut = i === M_ASM && asmLocked();
       const label = i === M_DIFF ? 'DIFFICULTY: ' + DIFF_NAMES[difficulty]
@@ -4225,7 +4515,7 @@
       const selected = i === menuIndex;
       drawText(label, x, y, shut ? C.red : selected ? C.yellow : C.text, 1);
       if (selected) drawPointer(x - 12, y);
-      menuBounds.push({ x: x - 16, y: y - 4, w: w + 24, h: 11 });
+      menuBounds.push({ x: x - 16, y: y - 4, w: w + 24, h: 10 });
     }
 
     // Scoring table below the menu items
@@ -4342,6 +4632,8 @@
         drawText('IN USE', 168, y, C.sq1, 1);
       } else if (cursorsOwned[c.id]) {
         drawText('OWNED', 168, y, C.text, 1);
+      } else if (c.cur === 'unlock') {
+        drawText('LOCKED', 168, y, C.red, 1);
       } else {
         const purse = c.cur === 'slug' ? slugs : coins;
         const ok = c.cur === 'slug' ? C.slug1 : C.coin1;
@@ -4362,9 +4654,77 @@
 
     const descY = baseY + CURSOR_VISIBLE * lineH + 6;
     const sel = cursorIndex < CURSORS.length ? CURSORS[cursorIndex] : null;
-    drawCenter(sel ? sel.desc : 'BACK TO THE MENU.', descY, C.text, 1);
+    const desc = !sel ? 'BACK TO THE MENU.'
+      : (sel.lockedDesc && !cursorsOwned[sel.id]) ? sel.lockedDesc
+      : sel.desc;
+    drawCenter(desc, descY, C.text, 1);
     if (shopMsgTimer > 0) drawCenter(shopMsg, descY + 10, shopMsgColor, 1);
     drawCenter('ENTER: BUY OR USE', VH - 14, C.text, 1);
+  }
+
+  function drawChallenges() {
+    ctx.fillStyle = 'rgba(0,0,0,0.82)';
+    ctx.fillRect(0, HUD_H, VW, PLAY_H);
+    drawCenter('CHALLENGES', 24, C.yellow, 2);
+    const got = CHALLENGES.filter(c => chalDone[c.id]).length;
+    drawCenter(got + ' / ' + CHALLENGES.length + ' DONE', 42,
+               got === CHALLENGES.length ? C.sq1 : C.text, 1);
+
+    clampChalScroll();
+    chalBounds.length = 0;
+    const baseY = 54, lineH = 13;
+    for (let v = 0; v < CHAL_VISIBLE; v++) {
+      const i = chalScroll + v;
+      if (i >= CHAL_ROWS) break;
+      const y = baseY + v * lineH;
+      const sel = i === chalIndex;
+      if (i === CHALLENGES.length) {
+        const label = 'BACK';
+        const x = Math.floor((VW - label.length * 4) / 2);
+        drawText(label, x, y, sel ? C.yellow : C.text, 1);
+        if (sel) drawPointer(x - 12, y);
+        chalBounds.push({ x: x - 16, y: y - 5, w: label.length * 4 + 24, h: 12, idx: i });
+        continue;
+      }
+      const ch = CHALLENGES[i];
+      const done = !!chalDone[ch.id];
+      if (done) drawTick(28, y);
+      drawText(ch.name, 40, y, done ? C.sq1 : sel ? C.yellow : C.text, 1);
+      if (done) {
+        drawText('DONE', 196, y, C.sq1, 1);
+      } else if (ch.cur === 'cursor') {
+        drawCursorArt(ch.prize, 172, y);
+        drawText('PRIZE', 186, y, C.magic1, 1);
+      } else {
+        if (ch.cur === 'slug') drawSlugBuck(176, y - 1);
+        else drawCoin(176, y - 1);
+        drawText(String(ch.cost), 186, y, ch.cur === 'slug' ? C.slug1 : C.coin1, 1);
+      }
+      if (sel) drawPointer(14, y);
+      chalBounds.push({ x: 12, y: y - 5, w: 216, h: 12, idx: i });
+    }
+
+    if (chalScroll > 0) drawScrollArrow(232, baseY - 7, true);
+    if (chalScroll + CHAL_VISIBLE < CHAL_ROWS) {
+      drawScrollArrow(232, baseY + CHAL_VISIBLE * lineH - 6, false);
+    }
+
+    const descY = baseY + CHAL_VISIBLE * lineH + 4;
+    const sel = chalIndex < CHALLENGES.length ? CHALLENGES[chalIndex] : null;
+    drawCenter(sel ? sel.desc : 'BACK TO THE MENU.', descY, C.text, 1);
+    if (shopMsgTimer > 0) drawCenter(shopMsg, descY + 10, shopMsgColor, 1);
+    drawCenter('THEY TICK OFF AS YOU PLAY', VH - 14, C.text, 1);
+  }
+
+  // A little green check against a challenge that is in the bag.
+  function drawTick(x, y) {
+    px(x,     y + 2, C.sq1);
+    px(x + 1, y + 3, C.sq1);
+    px(x + 2, y + 4, C.sq1);
+    px(x + 3, y + 3, C.sq1);
+    px(x + 4, y + 2, C.sq1);
+    px(x + 5, y + 1, C.sq1);
+    px(x + 6, y,     C.sq1);
   }
 
   function drawScrollArrow(x, y, up) {
@@ -4432,9 +4792,11 @@
       ['EVERY KILL PAYS COINS'],
       ['SPEND THEM IN THE SHOP'],
       ['ON HATS THAT HELP YOU'],
-      ['',       ''],
       ['BOSSES ON 5 10 15 AND 20'],
       ['LET GO BEFORE THEY SLIP'],
+      ['',       ''],
+      ['SOME BURROWS HAVE A TWIST'],
+      ['CHALLENGES PAY FROM THE MENU'],
     ];
     let y = 50;
     for (const [a, b] of lines) {
@@ -4444,7 +4806,7 @@
       } else if (a) {
         drawCenter(a, y, C.text, 1);
       }
-      y += 12;
+      y += 10;     // fifteen lines now, so they sit closer together
     }
     if ((Math.floor(performance.now()/400) % 2) === 0) {
       drawCenter('PRESS ANY KEY', VH - 18, C.red, 1);
