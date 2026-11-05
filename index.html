@@ -320,6 +320,22 @@
     };
   }
 
+  // Drop one more minion into any dirt it will fit in. Used when the burrow is
+  // dug, and again if a SWARM is called up mid-burrow.
+  function spawnMinion(type, levelIdx) {
+    let tries = 0;
+    while (tries < 80) {
+      tries++;
+      const r = 3 + ((Math.random() * (ROWS - 4)) | 0);
+      const c = 4 + ((Math.random() * (COLS - 5)) | 0);
+      if (grid[r][c] !== DIRT) continue;
+      grid[r][c] = EMPTY;
+      pds.push(makeMinion(type, c * TILE, r * TILE, minionSpeed(type, levelIdx)));
+      return true;
+    }
+    return false;
+  }
+
   function spawnPDs(levelIdx) {
     pds = [];
     const diffN = [-1, 0, 1][difficulty];     // easy: -1, normal: 0, hard: +1
@@ -327,19 +343,7 @@
     const nSquiggle = 1 + Math.min(2, Math.floor(levelIdx / 2));
     // Ants only start turning up once you are a burrow or two down
     const nAnt = levelIdx < 2 ? 0 : Math.min(3, Math.floor(levelIdx / 2));
-    const spawn = (type) => {
-      let tries = 0;
-      while (tries < 80) {
-        tries++;
-        const r = 3 + ((Math.random() * (ROWS - 4)) | 0);
-        const c = 4 + ((Math.random() * (COLS - 5)) | 0);
-        if (grid[r][c] !== DIRT) continue;
-        grid[r][c] = EMPTY;
-        pds.push(makeMinion(type, c * TILE, r * TILE, minionSpeed(type, levelIdx)));
-        return true;
-      }
-      return false;
-    };
+    const spawn = (type) => spawnMinion(type, levelIdx);
     // Boss burrows come with a proper crowd on top of whatever the boss calls up
     const bossSpawner = levelIdx >= KNIGHT_LEVEL ? spawnKnight
                       : levelIdx === JESTER_LEVEL ? spawnJester
@@ -359,9 +363,7 @@
     for (let i = 0; i < n; i++) spawn('pd');
     for (let i = 0; i < nSquiggle; i++) spawn('squiggle');
     for (let i = 0; i < nAnt; i++) spawn('ant');
-    if (eventId === 'swarm') {          // a crowded burrow - and a richer one
-      spawn('pd'); spawn('pd'); spawn('squiggle'); spawn('ant');
-    }
+    if (eventId === 'swarm') swarmExtras();
   }
 
   // ====== The Queen Mole ======
@@ -879,6 +881,7 @@
     } else if (gameState === 'play') {
       if (e.key === 'Escape') gameState = 'menu';
       else if (e.key === 'q' || e.key === 'Q') placeGadget();
+      else if (e.key === 'e' || e.key === 'E') triggerEvent();
     } else if (gameState !== 'play') {
       // dead / win / over -> any key returns to menu (or continues flow)
       if (gameState === 'over' || gameState === 'beat') gameState = 'menu';
@@ -924,8 +927,13 @@
     } else if (gameState === 'bosspick') {
       handleBossPickTap(ev);
     } else if (gameState === 'play') {
-      const mb = menuBtnBounds;
       const [mx, my] = canvasPoint(ev);
+      const eb = eventBtnBounds;
+      if (mx >= eb.x && mx <= eb.x + eb.w && my >= eb.y && my <= eb.y + eb.h) {
+        triggerEvent();
+        return;
+      }
+      const mb = menuBtnBounds;
       if (mx >= mb.x && mx <= mb.x + mb.w && my >= mb.y && my <= mb.y + mb.h) gameState = 'menu';
     } else if (gameState === 'code' || gameState === 'cheat') {
       handleKeypadTap(ev);
@@ -1016,7 +1024,9 @@
   const DARK_RADIUS = TILE * 3.5;  // how far the worm can see in a blackout
   let eventId = null;
   let eventBanner = 0;
+  let eventManual = false;   // called up with the TWIST button rather than rolled
   let rockfallTimer = 0;
+  let swarmSpawned = false;  // the crowd only turns out once a burrow
 
   function eventDef() { return EVENTS.find(e => e.id === eventId) || null; }
 
@@ -1029,11 +1039,44 @@
   function rollEvent() {
     eventId = null;
     eventBanner = 0;
+    eventManual = false;
     rockfallTimer = ROCKFALL_GAP;
+    swarmSpawned = false;
     if (level < 2 || isBossLevel(level)) return;
     if (Math.random() >= EVENT_CHANCE) return;
     eventId = EVENTS[(Math.random() * EVENTS.length) | 0].id;
     eventBanner = EVENT_BANNER;
+  }
+
+  // The worm's pace, read back off whatever twist is running. Called whenever
+  // the twist changes, so LOOSE SOIL can come and go mid-burrow without the
+  // speed compounding every time.
+  function applyEventSpeed() {
+    player.speed = equipped === 'slugcrown' ? WORM_SPEED_CROWN : WORM_SPEED;
+    if (eventId === 'soil') player.speed *= 1.4;
+  }
+
+  function swarmExtras() {
+    if (swarmSpawned) return;
+    swarmSpawned = true;
+    spawnMinion('pd', level);
+    spawnMinion('pd', level);
+    spawnMinion('squiggle', level);
+    spawnMinion('ant', level);
+  }
+
+  // The TWIST button, and the E key. Always a different twist from the one
+  // already running, so a press always shows you something. The rolling in
+  // rollEvent carries on exactly as before.
+  function triggerEvent() {
+    if (gameState !== 'play' || !player.alive) return;
+    const pool = EVENTS.filter(e => e.id !== eventId);
+    eventId = pool[(Math.random() * pool.length) | 0].id;
+    eventManual = true;
+    eventBanner = EVENT_BANNER;
+    rockfallTimer = ROCKFALL_GAP;
+    applyEventSpeed();
+    if (eventId === 'swarm') swarmExtras();
   }
 
   // ROCKFALL: a rock works its way out of the ceiling. It wobbles where you
@@ -1288,7 +1331,7 @@
   function chalClear() {
     if (burrowRocks === 0) chalWin('purist');
     if (burrowFrames < 30 * 60) chalWin('speeddig');
-    if (eventId) chalWin('stormer');
+    if (eventId && !eventManual) chalWin('stormer');
     if (isBossLevel(level) && levelDeaths === 0) chalWin('slayer');
     if (level >= 7) chalWin('deepdive');       // clearing 7 puts you in 8
     runClean++;
@@ -1592,6 +1635,7 @@
   const coinBtnBounds = { x: 6, y: HUD_H + 4, w: 24, h: 24 };
   const wantedBtnBounds = { x: VW - 34, y: HUD_H + 2, w: 30, h: 28 };
   const menuBtnBounds = { x: 228, y: 0, w: 28, h: HUD_H };
+  const eventBtnBounds = { x: VW - 36, y: VH - 13, w: 34, h: 12 };
   let codeDest = 'coins';         // what the keypad is guarding this time
   const curBtnBounds = [];          // currency toggle on the payout screen
   let grantCurrency = 'coin';
@@ -1945,7 +1989,7 @@
     rollEvent();             // before the dirt, so SWARM can seed extra minions
     makeLevel(level);
     spawnPlayer();
-    if (eventId === 'soil') player.speed *= 1.4;
+    applyEventSpeed();
     spawnPDs(level);
     rocks = [];
     mines = [];            // three fresh mines every burrow
@@ -4334,12 +4378,14 @@
     if (eventId === 'dark' && (gameState === 'play' || gameState === 'dead')) {
       drawBlackout();
     }
-    // Whatever twist is on, named in the corner for as long as it lasts.
+    // Whatever twist is on, named in the corner for as long as it lasts, and
+    // the button that calls up another one.
     if (eventId && gameState === 'play') {
       const ev = eventDef();
       rect(1, VH - 10, ev.name.length * 4 + 4, 9, '#000');
       drawText(ev.name, 3, VH - 8, ev.color, 1);
     }
+    if (gameState === 'play') drawEventButton();
     if (eventBanner > 0 && gameState === 'play') {
       const ev = eventDef();
       drawCenter(ev.name + '!', VH/2 - 30, ev.color, 2);
@@ -4441,6 +4487,16 @@
         drawCenter('PRESS ENTER', VH/2 + 54, C.text, 1);
       }
     }
+  }
+
+  // Press it for a twist on the spot. Sits in the far corner from the tag
+  // that names whichever one is running.
+  function drawEventButton() {
+    const b = eventBtnBounds;
+    rect(b.x, b.y, b.w, b.h, '#3a1c0a');
+    rect(b.x, b.y, b.w, 1, C.dirt1);
+    rect(b.x, b.y + b.h - 1, b.w, 1, '#000000');
+    drawText('TWIST', b.x + 7, b.y + 4, C.yellow, 1);
   }
 
   // Black out every tile past the worm's own pool of light, with one ring of
@@ -4784,11 +4840,11 @@
     const lines = [
       ['ARROWS', 'MOVE AND DIG'],
       ['SPACE',  'SQUIRT INK'],
+      ['E',      'FORCE A TWIST'],
       ['',       ''],
       ['INFLATE PRAIRIE DOGS'],
       ['WITH INK UNTIL THEY POP'],
       ['OR DROP ROCKS ON THEM'],
-      ['',       ''],
       ['EVERY KILL PAYS COINS'],
       ['SPEND THEM IN THE SHOP'],
       ['ON HATS THAT HELP YOU'],
