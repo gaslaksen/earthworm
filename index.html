@@ -899,6 +899,8 @@
       handleBossPickKey(e.key);
     } else if (gameState === 'twistpick') {
       handleTwistPickKey(e.key);
+    } else if (gameState === 'resume') {
+      handleResumeKey(e.key);
     } else if (gameState === 'code' || gameState === 'cheat') {
       handleCodeKey(e.key);
     } else if (gameState === 'howto') {
@@ -1021,6 +1023,8 @@
       handleBossPickTap(ev);
     } else if (gameState === 'twistpick') {
       handleTwistPickTap(ev);
+    } else if (gameState === 'resume') {
+      handleResumeTap(ev);
     } else if (gameState === 'play') {
       const [mx, my] = canvasPoint(ev);
       const mb = menuBtnBounds;
@@ -1100,7 +1104,7 @@
   let level = 1;
   let score = 0;
   let lives = 3;
-  let gameState = 'menu'; // menu, howto, shop, chal, play, dead, win, over
+  let gameState = 'menu'; // menu, howto, shop, chal, resume, play, dead, win, over
   let stateTimer = 0;
   let deathCause = 'chomp'; // 'chomp' or 'squish'
   let rocks = []; // active falling rock physics objects: {x,y,vy,r,c,landed}
@@ -1437,11 +1441,77 @@
     levelDeaths = 0;
   }
 
+  // ====== Carrying a run over ======
+  // Coins and slugbucks were always banked the moment you picked them up.
+  // This is the rest of a run - which burrow you were down, the score, the
+  // lives left - written at the top of every burrow so closing the game, or
+  // bailing out to the title, does not throw the whole dig away.
+  //
+  // Only the burrow NUMBER is kept, not the burrow itself. Coming back
+  // re-digs it from scratch, the same as dying already does.
+  let runSave = null;
+
+  function snapshotRun() {
+    runSave = {
+      level, score, lives, runCoins, runSlugs,
+      runRockKills, runClean, runBare, runCheated, levelDeaths, difficulty,
+    };
+    saveProgress();
+  }
+
+  function clearRun() {
+    runSave = null;
+    saveProgress();
+  }
+
+  // A run read back off disk is not to be trusted - clamp every field, and
+  // treat anything without a believable burrow as no run at all.
+  function validRun(r) {
+    if (!r || typeof r !== 'object') return null;
+    const n = (v, lo, hi, dflt) =>
+      (typeof v === 'number' && isFinite(v)) ? Math.max(lo, Math.min(hi, v | 0)) : dflt;
+    const lv = n(r.level, 0, FINAL_LEVEL, 0);
+    const lives0 = n(r.lives, 0, 99, 0);
+    if (lv < 1 || lives0 < 1) return null;
+    return {
+      level: lv,
+      lives: lives0,
+      score: n(r.score, 0, 99999999, 0),
+      runCoins: n(r.runCoins, 0, 99999999, 0),
+      runSlugs: n(r.runSlugs, 0, 99999999, 0),
+      runRockKills: n(r.runRockKills, 0, 9999, 0),
+      runClean: n(r.runClean, 0, 9999, 0),
+      runBare: n(r.runBare, 0, 9999, 0),
+      runCheated: n(r.runCheated, 0, 1, 0),
+      levelDeaths: n(r.levelDeaths, 0, 9999, 0),
+      difficulty: n(r.difficulty, 0, DIFF_NAMES.length - 1, 1),
+    };
+  }
+
+  function continueRun() {
+    const r = runSave;
+    if (!r) { startGame(); return; }
+    difficulty = r.difficulty;
+    level = r.level;
+    score = r.score;
+    lives = r.lives;
+    runCoins = r.runCoins;
+    runSlugs = r.runSlugs;
+    runRockKills = r.runRockKills;
+    runClean = r.runClean;
+    runBare = r.runBare;
+    runCheated = r.runCheated;
+    levelDeaths = r.levelDeaths;
+    beginLevel();
+    gameState = 'play';
+  }
+
   const SAVE_KEY = 'earthworm.save.v1';
   function saveProgress() {
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify({
         coins, slugs, owned, equipped, cursorsOwned, cursorEquipped, chalDone,
+        run: runSave,
       }));
     } catch (e) { /* storage blocked - play on without saving */ }
   }
@@ -1466,6 +1536,8 @@
       if (d.chalDone && typeof d.chalDone === 'object') {
         for (const c of CHALLENGES) if (d.chalDone[c.id]) chalDone[c.id] = true;
       }
+      runSave = validRun(d.run);
+      if (runSave) difficulty = runSave.difficulty;
     } catch (e) { /* missing or corrupt save - start fresh */ }
   }
 
@@ -1499,7 +1571,7 @@
   }
 
   function activateMenu() {
-    if (menuIndex === M_PLAY) startGame();
+    if (menuIndex === M_PLAY) openResume();
     else if (menuIndex === M_SHOP) { gameState = 'shop'; shopMsgTimer = 0; }
     else if (menuIndex === M_CURSORS) { gameState = 'cursors'; shopMsgTimer = 0; }
     else if (menuIndex === M_CHAL) { gameState = 'chal'; shopMsgTimer = 0; }
@@ -1513,6 +1585,48 @@
     }
     else if (menuIndex === M_HOWTO) gameState = 'howto';
     else if (menuIndex === M_DIFF) difficulty = (difficulty + 1) % DIFF_NAMES.length;
+  }
+
+  // ====== Carry on, or start again ======
+  // PLAY lands here when there is a run to come back to, and goes straight
+  // into a fresh one when there is not.
+  const RESUME_LABELS = ['CONTINUE', 'NEW RUN', 'BACK'];
+  const R_CONTINUE = 0, R_NEW = 1, R_BACK = 2;
+  const resumeBounds = [];
+  let resumeIndex = 0;
+
+  function openResume() {
+    if (!runSave) { startGame(); return; }
+    resumeIndex = R_CONTINUE;
+    gameState = 'resume';
+  }
+
+  function activateResume() {
+    if (resumeIndex === R_CONTINUE) continueRun();
+    else if (resumeIndex === R_NEW) startGame();
+    else gameState = 'menu';
+  }
+
+  function handleResumeKey(key) {
+    if (key === 'Escape' || key === 'Backspace') { gameState = 'menu'; return; }
+    if (key === 'ArrowUp' || key === 'w' || key === 'W') {
+      resumeIndex = (resumeIndex + RESUME_LABELS.length - 1) % RESUME_LABELS.length;
+    } else if (key === 'ArrowDown' || key === 's' || key === 'S') {
+      resumeIndex = (resumeIndex + 1) % RESUME_LABELS.length;
+    } else if (key === 'Enter' || key === ' ' || key === 'z' || key === 'Z') {
+      activateResume();
+    }
+  }
+
+  function handleResumeTap(ev) {
+    const [px1, py1] = canvasPoint(ev);
+    for (const b of resumeBounds) {
+      if (px1 >= b.x && px1 <= b.x + b.w && py1 >= b.y && py1 <= b.y + b.h) {
+        resumeIndex = b.idx;
+        activateResume();
+        return;
+      }
+    }
   }
 
   // ====== Shop ======
@@ -2131,6 +2245,7 @@
   }
 
   function beginLevel() {
+    snapshotRun();           // where to pick things up if you walk away
     rollEvent();             // before the dirt, so SWARM can seed extra minions
     makeLevel(level);
     spawnPlayer();
@@ -2411,9 +2526,11 @@
     levelDeaths++;
     runClean = 0;
     if (lives <= 0) {
+      clearRun();            // nothing left to come back to
       gameState = 'over';
       stateTimer = 0;
     } else {
+      snapshotRun();         // the life is spent whether you stay or not
       gameState = 'dead';
       stateTimer = 0;
     }
@@ -2422,6 +2539,7 @@
   function nextLevel() {
     chalClear();
     if (level >= FINAL_LEVEL) {
+      clearRun();            // the bottom. There is no carrying on from here
       gameState = 'beat';
       stateTimer = 0;
       return;
@@ -2443,11 +2561,13 @@
         : { title: BOSS_FALLS[type], prize: 'HE WILL BE BACK',
             note: 'BURROW ' + (level + 1) + ' OF ' + FINAL_LEVEL };
       level++;
+      snapshotRun();         // this burrow is behind you now
       gameState = 'bosswin';
       stateTimer = 0;
       return;
     }
     level++;
+    snapshotRun();
     gameState = 'win';
     stateTimer = 0;
   }
@@ -3697,6 +3817,41 @@
     rect(x+3, y+22, 22, 1, C.paperD);
   }
 
+  function drawResume() {
+    ctx.fillStyle = 'rgba(0,0,0,0.9)';
+    ctx.fillRect(0, HUD_H, VW, PLAY_H);
+    drawCenter('CARRY ON?', 30, C.yellow, 2);
+
+    const r = runSave;
+    if (r) {
+      drawCenter('BURROW ' + r.level + '   ' + DIFF_NAMES[r.difficulty], 54, C.text, 1);
+      drawCenter('SCORE ' + String(r.score).padStart(5, '0'), 66, C.text, 1);
+      // lives, drawn as the little worms the HUD uses
+      const n = Math.min(r.lives, 8);
+      const lx = Math.floor((VW - (n * 10 - 2)) / 2);
+      for (let i = 0; i < n; i++) {
+        rect(lx + i * 10, 78, 8, 4, C.worm2);
+        rect(lx + i * 10 + 1, 79, 6, 2, C.worm1);
+      }
+    }
+
+    resumeBounds.length = 0;
+    const baseY = 104, lineH = 18;
+    for (let i = 0; i < RESUME_LABELS.length; i++) {
+      const label = RESUME_LABELS[i];
+      const y = baseY + i * lineH;
+      const sel = resumeIndex === i;
+      const w = label.length * 4;
+      const x = Math.floor((VW - w) / 2);
+      drawText(label, x, y, sel ? C.yellow : C.text, 1);
+      if (sel) drawPointer(x - 12, y);
+      resumeBounds.push({ x: x - 16, y: y - 6, w: w + 24, h: 16, idx: i });
+    }
+
+    drawCenter('A NEW RUN STARTS AT BURROW 1', VH - 26, C.rock1, 1);
+    drawCenter('AND THROWS THIS ONE AWAY', VH - 14, C.rock1, 1);
+  }
+
   function drawTwistPick() {
     ctx.fillStyle = 'rgba(0,0,0,0.9)';
     ctx.fillRect(0, HUD_H, VW, PLAY_H);
@@ -4627,6 +4782,8 @@
       drawBossPick();
     } else if (gameState === 'twistpick') {
       drawTwistPick();
+    } else if (gameState === 'resume') {
+      drawResume();
     } else if (gameState === 'code') {
       drawCodeScreen();
     } else if (gameState === 'cheat') {
