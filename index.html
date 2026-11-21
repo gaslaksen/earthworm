@@ -204,6 +204,8 @@
     ant1:   '#7a3a1c',   // worker ant
     ted1:   '#d8a860',   // teddy bear, kept well clear of the prairie dog browns
     ted2:   '#8a6030',
+    dino1:  '#5ad0a8',   // stuffed dino: a teal, so it is no relation to the
+    dino2:  '#2a8870',   // squiggle or the slug
   };
 
   // ====== Tiles ======
@@ -1256,6 +1258,7 @@
     { id: 'sushi',  name: 'SUSHI',        cost: 14, cur: 'slug', desc: 'VERY FANCY POINTING.' },
     { id: 'teddy',  name: 'TEDDY BEAR',   cost: 40, cur: 'coin', desc: 'A FRIEND WHO POINTS.' },
     { id: 'rabbit', name: 'STUFFED RABBIT',cost: 45, cur: 'coin', desc: 'FLOPPY EARS. NO HOPPING.' },
+    { id: 'dino',   name: 'STUFFED DINO',  cost: 50, cur: 'coin', desc: 'EXTINCT, BUT STILL POINTING.' },
     { id: 'sun',    name: 'SUN',          cost: 55, cur: 'coin', desc: 'BRIGHT, DOWN A DARK HOLE.' },
     { id: 'moon',   name: 'MOON',         cost: 55, cur: 'coin', desc: 'FOR LATE NIGHT DIGGING.' },
     { id: 'rocket', name: 'ROCKET',      cost: 60, cur: 'coin', desc: 'POINTS AT THINGS VERY FAST.' },
@@ -4223,6 +4226,22 @@
     rect(x + 2, y + 5, 4, 1, C.prop2);      // blue ribbon, so it is not the teddy
   }
 
+  // A stuffed stegosaurus, side on. Plates along his back and a snout out to
+  // the right, so he is not another round head with ears on it.
+  function drawCursorDino(x, y) {
+    rect(x + 1, y, 4, 3, C.dino2);          // body
+    rect(x + 1, y + 1, 4, 2, C.dino1);
+    px(x, y + 1, C.dino2);                  // tail nub
+    rect(x + 5, y, 3, 3, C.dino2);          // head, snout to the right
+    rect(x + 5, y, 2, 2, C.dino1);
+    px(x + 6, y + 1, C.sqEye);              // eye
+    px(x + 1, y - 1, C.dino2);              // plates along the back
+    px(x + 3, y - 1, C.dino2);
+    rect(x + 1, y + 3, 4, 1, C.coin1);      // a yellow ribbon, because it is a toy
+    px(x + 1, y + 4, C.dino2);              // feet
+    px(x + 4, y + 4, C.dino2);
+  }
+
   function drawCursorTeddy(x, y) {
     rect(x, y - 1, 2, 3, C.ted2);           // big round ears, out at the sides
     rect(x + 6, y - 1, 2, 3, C.ted2);
@@ -4392,7 +4411,7 @@
     carrot: drawCursorCarrot, lolly: drawCursorLolly, cane: drawCursorCane,
     choc: drawCursorChoc, pizza: drawCursorPizza, donut: drawCursorDonut,
     icecrm: drawCursorIcecream, cookie: drawCursorCookie, sushi: drawCursorSushi,
-    teddy: drawCursorTeddy, rabbit: drawCursorRabbit,
+    teddy: drawCursorTeddy, rabbit: drawCursorRabbit, dino: drawCursorDino,
     fries: drawCursorFries, cake: drawCursorCupcake,
     sun: drawCursorSun, moon: drawCursorMoon,
     rocket: drawCursorRocket, star: drawCursorStar, coin: drawCursorCoin,
