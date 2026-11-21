@@ -906,7 +906,6 @@
     } else if (gameState === 'play') {
       if (e.key === 'Escape') gameState = 'menu';
       else if (e.key === 'q' || e.key === 'Q') placeGadget();
-      else if (e.key === 'e' || e.key === 'E') triggerEvent();
     } else if (gameState !== 'play') {
       // dead / win / over -> any key returns to menu (or continues flow)
       if (gameState === 'over' || gameState === 'beat') gameState = 'menu';
@@ -1024,11 +1023,6 @@
       handleTwistPickTap(ev);
     } else if (gameState === 'play') {
       const [mx, my] = canvasPoint(ev);
-      const eb = eventBtnBounds;
-      if (mx >= eb.x && mx <= eb.x + eb.w && my >= eb.y && my <= eb.y + eb.h) {
-        triggerEvent();
-        return;
-      }
       const mb = menuBtnBounds;
       if (mx >= mb.x && mx <= mb.x + mb.w && my >= mb.y && my <= mb.y + mb.h) gameState = 'menu';
     } else if (gameState === 'code' || gameState === 'cheat') {
@@ -1167,9 +1161,9 @@
     spawnMinion('ant', level);
   }
 
-  // The TWIST button, and the E key. Always a different twist from the one
-  // already running, so a press always shows you something. The rolling in
-  // rollEvent carries on exactly as before.
+  // Put a twist on by hand. Only the mystery block on the title screen does
+  // this, from behind the code - mid-burrow there is no way to call one up,
+  // or picking your moment would be too easy.
   function setTwist(id) {
     eventId = id;
     eventManual = true;
@@ -1177,12 +1171,6 @@
     rockfallTimer = ROCKFALL_GAP;
     applyEventSpeed();
     if (id === 'swarm') swarmExtras();
-  }
-
-  function triggerEvent() {
-    if (gameState !== 'play' || !player.alive) return;
-    const pool = EVENTS.filter(e => e.id !== eventId);
-    setTwist(pool[(Math.random() * pool.length) | 0].id);
   }
 
   // ROCKFALL: a rock works its way out of the ceiling. It wobbles where you
@@ -1744,7 +1732,6 @@
   const wantedBtnBounds = { x: VW - 34, y: HUD_H + 2, w: 30, h: 28 };
   const twistBtnBounds = { x: 6, y: HUD_H + 34, w: 24, h: 24 };
   const menuBtnBounds = { x: 228, y: 0, w: 28, h: HUD_H };
-  const eventBtnBounds = { x: VW - 36, y: VH - 13, w: 34, h: 12 };
   let codeDest = 'coins';         // what the keypad is guarding this time
   const curBtnBounds = [];          // currency toggle on the payout screen
   let grantCurrency = 'coin';
@@ -4582,7 +4569,6 @@
       rect(1, VH - 10, ev.name.length * 4 + 4, 9, '#000');
       drawText(ev.name, 3, VH - 8, ev.color, 1);
     }
-    if (gameState === 'play') drawEventButton();
     if (eventBanner > 0 && gameState === 'play') {
       const ev = eventDef();
       drawCenter(ev.name + '!', VH/2 - 30, ev.color, 2);
@@ -4686,16 +4672,6 @@
         drawCenter('PRESS ENTER', VH/2 + 54, C.text, 1);
       }
     }
-  }
-
-  // Press it for a twist on the spot. Sits in the far corner from the tag
-  // that names whichever one is running.
-  function drawEventButton() {
-    const b = eventBtnBounds;
-    rect(b.x, b.y, b.w, b.h, '#3a1c0a');
-    rect(b.x, b.y, b.w, 1, C.dirt1);
-    rect(b.x, b.y + b.h - 1, b.w, 1, '#000000');
-    drawText('TWIST', b.x + 7, b.y + 4, C.yellow, 1);
   }
 
   // Black out every tile past the worm's own pool of light, with one ring of
@@ -5046,11 +5022,11 @@
     const lines = [
       ['ARROWS', 'MOVE AND DIG'],
       ['SPACE',  'SQUIRT INK'],
-      ['E',      'FORCE A TWIST'],
       ['',       ''],
       ['INFLATE PRAIRIE DOGS'],
       ['WITH INK UNTIL THEY POP'],
       ['OR DROP ROCKS ON THEM'],
+      ['',       ''],
       ['EVERY KILL PAYS COINS'],
       ['SPEND THEM IN THE SHOP'],
       ['ON HATS THAT HELP YOU'],
@@ -5068,7 +5044,7 @@
       } else if (a) {
         drawCenter(a, y, C.text, 1);
       }
-      y += 10;     // fifteen lines now, so they sit closer together
+      y += 10;     // fifteen lines, so they sit closer than they used to
     }
     if ((Math.floor(performance.now()/400) % 2) === 0) {
       drawCenter('PRESS ANY KEY', VH - 18, C.red, 1);
