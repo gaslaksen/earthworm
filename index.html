@@ -206,6 +206,10 @@
     ted2:   '#8a6030',
     dino1:  '#5ad0a8',   // stuffed dino: a teal, so it is no relation to the
     dino2:  '#2a8870',   // squiggle or the slug
+    cat1:   '#c4b4e4',   // stuffed cat, grey with a lilac tint
+    cat2:   '#6a5a90',
+    dog1:   '#f0f0f0',   // stuffed dog, white with near-black patches - no
+    dog2:   '#383840',   // brown, or he would be the teddy again
   };
 
   // ====== Tiles ======
@@ -1259,6 +1263,8 @@
     { id: 'teddy',  name: 'TEDDY BEAR',   cost: 40, cur: 'coin', desc: 'A FRIEND WHO POINTS.' },
     { id: 'rabbit', name: 'STUFFED RABBIT',cost: 45, cur: 'coin', desc: 'FLOPPY EARS. NO HOPPING.' },
     { id: 'dino',   name: 'STUFFED DINO',  cost: 50, cur: 'coin', desc: 'EXTINCT, BUT STILL POINTING.' },
+    { id: 'cat',    name: 'STUFFED CAT',   cost: 45, cur: 'coin', desc: 'POINTS WHEN IT FEELS LIKE IT.' },
+    { id: 'dog',    name: 'STUFFED DOG',   cost: 48, cur: 'coin', desc: 'POINTS AT EVERYTHING. GOOD BOY.' },
     { id: 'sun',    name: 'SUN',          cost: 55, cur: 'coin', desc: 'BRIGHT, DOWN A DARK HOLE.' },
     { id: 'moon',   name: 'MOON',         cost: 55, cur: 'coin', desc: 'FOR LATE NIGHT DIGGING.' },
     { id: 'rocket', name: 'ROCKET',      cost: 60, cur: 'coin', desc: 'POINTS AT THINGS VERY FAST.' },
@@ -4242,6 +4248,34 @@
     px(x + 4, y + 4, C.dino2);
   }
 
+  // Pointed ears on top and whiskers out at the sides - the teddy's ears sit
+  // low and round, the rabbit's stand straight up.
+  function drawCursorCat(x, y) {
+    rect(x + 1, y, 6, 5, C.cat2);           // head
+    rect(x + 2, y + 1, 4, 3, C.cat1);
+    rect(x + 1, y - 1, 2, 1, C.cat2);       // the ears poke out of the top
+    rect(x + 5, y - 1, 2, 1, C.cat2);
+    px(x + 2, y + 1, C.sqEye);              // eyes
+    px(x + 5, y + 1, C.sqEye);
+    px(x + 3, y + 2, C.candy);              // little pink nose
+    px(x, y + 2, C.cat2);                   // whiskers
+    px(x + 7, y + 2, C.cat2);
+    rect(x + 2, y + 5, 4, 1, C.candy);      // pink ribbon
+  }
+
+  // Ears hanging right down the sides, a dark muzzle, and a collar. An eye
+  // patch was the first idea, but at this size it ran into the near ear and
+  // the whole left of his head went dark.
+  function drawCursorDog(x, y) {
+    rect(x + 2, y, 4, 4, C.dog1);           // head
+    rect(x, y, 2, 4, C.dog2);               // long floppy ears
+    rect(x + 6, y, 2, 4, C.dog2);
+    px(x + 2, y + 1, C.sqEye);              // eyes
+    px(x + 5, y + 1, C.sqEye);
+    rect(x + 3, y + 2, 2, 1, C.dog2);       // muzzle
+    rect(x + 2, y + 4, 4, 1, C.sq1);        // green collar
+  }
+
   function drawCursorTeddy(x, y) {
     rect(x, y - 1, 2, 3, C.ted2);           // big round ears, out at the sides
     rect(x + 6, y - 1, 2, 3, C.ted2);
@@ -4412,6 +4446,7 @@
     choc: drawCursorChoc, pizza: drawCursorPizza, donut: drawCursorDonut,
     icecrm: drawCursorIcecream, cookie: drawCursorCookie, sushi: drawCursorSushi,
     teddy: drawCursorTeddy, rabbit: drawCursorRabbit, dino: drawCursorDino,
+    cat: drawCursorCat, dog: drawCursorDog,
     fries: drawCursorFries, cake: drawCursorCupcake,
     sun: drawCursorSun, moon: drawCursorMoon,
     rocket: drawCursorRocket, star: drawCursorStar, coin: drawCursorCoin,
