@@ -210,6 +210,8 @@
     cat2:   '#6a5a90',
     dog1:   '#f0f0f0',   // stuffed dog, white with near-black patches - no
     dog2:   '#383840',   // brown, or he would be the teddy again
+    pen1:   '#232a3c',   // stuffed penguin: navy, not the dog's neutral dark
+    pen2:   '#eef2ff',   // ...and a cool white front
   };
 
   // ====== Tiles ======
@@ -1265,6 +1267,7 @@
     { id: 'dino',   name: 'STUFFED DINO',  cost: 50, cur: 'coin', desc: 'EXTINCT, BUT STILL POINTING.' },
     { id: 'cat',    name: 'STUFFED CAT',   cost: 45, cur: 'coin', desc: 'POINTS WHEN IT FEELS LIKE IT.' },
     { id: 'dog',    name: 'STUFFED DOG',   cost: 48, cur: 'coin', desc: 'POINTS AT EVERYTHING. GOOD BOY.' },
+    { id: 'penguin',name: 'STUFFED PENGUIN',cost: 52, cur: 'coin', desc: 'DRESSED FOR THE OCCASION.' },
     { id: 'sun',    name: 'SUN',          cost: 55, cur: 'coin', desc: 'BRIGHT, DOWN A DARK HOLE.' },
     { id: 'moon',   name: 'MOON',         cost: 55, cur: 'coin', desc: 'FOR LATE NIGHT DIGGING.' },
     { id: 'rocket', name: 'ROCKET',      cost: 60, cur: 'coin', desc: 'POINTS AT THINGS VERY FAST.' },
@@ -4248,6 +4251,20 @@
     px(x + 4, y + 4, C.dino2);
   }
 
+  // Standing up, flippers out at the sides, with the orange beak and feet
+  // doing the work no other toy in the list is doing.
+  function drawCursorPenguin(x, y) {
+    rect(x + 1, y - 1, 6, 5, C.pen1);       // head, back and tail
+    px(x + 2, y, C.eye);                    // eyes
+    px(x + 5, y, C.eye);
+    rect(x + 3, y + 1, 2, 1, C.carrot);     // beak
+    rect(x, y + 1, 1, 2, C.pen1);           // flippers
+    rect(x + 7, y + 1, 1, 2, C.pen1);
+    rect(x + 2, y + 2, 4, 2, C.pen2);       // white front
+    rect(x + 1, y + 4, 2, 1, C.carrot);     // feet
+    rect(x + 5, y + 4, 2, 1, C.carrot);
+  }
+
   // Pointed ears on top and whiskers out at the sides - the teddy's ears sit
   // low and round, the rabbit's stand straight up.
   function drawCursorCat(x, y) {
@@ -4446,7 +4463,7 @@
     choc: drawCursorChoc, pizza: drawCursorPizza, donut: drawCursorDonut,
     icecrm: drawCursorIcecream, cookie: drawCursorCookie, sushi: drawCursorSushi,
     teddy: drawCursorTeddy, rabbit: drawCursorRabbit, dino: drawCursorDino,
-    cat: drawCursorCat, dog: drawCursorDog,
+    cat: drawCursorCat, dog: drawCursorDog, penguin: drawCursorPenguin,
     fries: drawCursorFries, cake: drawCursorCupcake,
     sun: drawCursorSun, moon: drawCursorMoon,
     rocket: drawCursorRocket, star: drawCursorStar, coin: drawCursorCoin,
@@ -5084,8 +5101,10 @@
         else drawCoin(168, y - 1);
         drawText(String(c.cost), 178, y, purse >= c.cost ? ok : C.red, 1);
       }
-      // The marker shows the pointer you are looking at, so you can try before you buy
-      if (sel) drawCursorArt(c.id, 14, y);
+      // Your own pointer marks the row, the same as everywhere else. It used
+      // to show whichever one you were sitting on, which just looked like the
+      // pointer changing under you.
+      if (sel) drawPointer(14, y);
       cursorBounds.push({ x: 12, y: y - 4, w: 216, h: 11, idx: i });
     }
 
